@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Client Portal</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  :root{--brand1:#5b6ef5;--brand2:#7c5cfa;}
+  body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4fa;}
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  input:focus,textarea:focus,select:focus{outline:none;}
+  ::-webkit-scrollbar{width:7px;height:7px;}
+  ::-webkit-scrollbar-thumb{background:#c4c9de;border-radius:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  .save-toast{position:fixed;top:14px;right:14px;background:#166534;color:#fff;padding:9px 18px;border-radius:10px;font-size:12px;font-weight:600;z-index:999;opacity:0;transition:opacity .3s,transform .3s;transform:translateY(-8px);pointer-events:none;box-shadow:0 6px 20px rgba(22,101,52,.3);}
+  .save-toast.show{opacity:1;transform:translateY(0);}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+  .fade-up{animation:fadeUp .35s ease;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.5;}}
+  .pulse{animation:pulse 1.8s ease-in-out infinite;}
+  /* Responsive helpers — phone-first */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;}
+  .row-wrap{display:flex;gap:8;flex-wrap:wrap;}
+  @media (max-width:680px){
+    .grid2{grid-template-columns:1fr !important;gap:0 !important;}
+    .pad-resp{padding:16px 14px !important;}
+    .hide-mobile{display:none !important;}
+    .stack-mobile{flex-direction:column !important;align-items:stretch !important;}
+    .full-mobile{width:100% !important;}
+    input,textarea,select{font-size:16px !important;} /* prevents iOS zoom-on-focus */
+  }
+  @media (max-width:420px){
+    .pad-resp{padding:14px 12px !important;}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="save-toast" class="save-toast">✓ Progress saved</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script type="text/babel">
+window.storage={
+  get:async function(key){var v=localStorage.getItem("cp_"+key);if(v===null)throw new Error("not found");return{key:key,value:v};},
+  set:async function(key,value){localStorage.setItem("cp_"+key,value);return{key:key,value:value};},
+  delete:async function(key){localStorage.removeItem("cp_"+key);return{key:key,deleted:true};},
+  list:async function(prefix){var keys=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k.startsWith("cp_"+(prefix||"")))keys.push(k.slice(3));}return{keys:keys};}
+};
+
+var useState=React.useState;var useEffect=React.useEffect;var useCallback=React.useCallback;var useRef=React.useRef;
+
+var ADMIN={user:"admin"};
+// SECURITY: No password is stored in this public code. On first run the admin
+// sets their own password (kept only in this browser's local storage). The very
+// first time, signing in as "admin" with any password you choose will set it.
+async function getAdminPass(){try{var r=await window.storage.get("config:adminPass");return r&&r.value?r.value:null;}catch(ex){return null;}}
+async function isAdminPassSet(){var p=await getAdminPass();return !!p;}
+
+// Apply saved brand colors on startup
+function applyTheme(c1,c2){try{var root=document.documentElement;if(c1)root.style.setProperty("--brand1",c1);if(c2)root.style.setProperty("--brand2",c2);}catch(ex){}}
+(function(){try{var c1=localStorage.getItem("cp_config:brand1");var c2=localStorage.getItem("cp_config:brand2");applyTheme(c1,c2);}catch(ex){}})();
+var DEFAULT_LOGO="data:image/jpeg;base64,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";
+// Seed the default brand logo once (admin can replace it later)
+(function(){try{if(localStorage.getItem("cp_config:logoSeeded")!=="1"){if(!localStorage.getItem("cp_config:logo")){localStorage.setItem("cp_config:logo",DEFAULT_LOGO);}localStorage.setItem("cp_config:logoSeeded","1");if(!localStorage.getItem("cp_config:businessName")){localStorage.setItem("cp_config:businessName","FEGGO Global Services");}}}catch(ex){}})();
+function getLogo(){try{return localStorage.getItem("cp_config:logo")||"";}catch(ex){return "";}}
+var PROJECT_TYPES=["School Website","Business Website","E-Commerce / Online Store","Portfolio / Personal","Landing Page","Blog / Magazine","Non-Profit / NGO","Restaurant / Cafe","Real Estate","SaaS / Web App","Web Application (Custom)","Mobile App (Android / iOS)","Cross-Platform App (Flutter / React Native)","Desktop Application","Admin Dashboard / Panel","API / Backend Service","Database Design & Management","Booking / Reservation System","Inventory / POS System","Hospital / Clinic Management","Hotel Management System","School Management System (Full)","Learning Platform / LMS","Payment / Fintech Integration","Logistics / Delivery System","CRM (Customer Management)","ERP (Business Operations)","Chatbot / AI Assistant","AI / Machine Learning Solution","Data Analytics / Dashboard","Cybersecurity / Audit","Cloud Setup & Deployment (DevOps)","System Integration / Automation","UI / UX Design","Branding & Logo Design","Tech Consulting & Advisory","Other (write your own)"];
+
+var MILESTONES=[
+  {id:"brief",label:"Brief Received",icon:"\u{1F4DD}",desc:"We've received your project requirements"},
+  {id:"discovery",label:"Discovery & Analysis",icon:"\u{1F50D}",desc:"Studying your needs and defining the project scope"},
+  {id:"planning",label:"Planning & Quote",icon:"\u{1F4CA}",desc:"Preparing the plan, timeline, and a detailed quote"},
+  {id:"design",label:"UI / UX Design",icon:"\u{1F3A8}",desc:"Creating the visual design, layout, and user experience"},
+  {id:"approval",label:"Design Approval",icon:"\u2705",desc:"You review and approve the design before we build"},
+  {id:"development",label:"Development",icon:"\u{1F4BB}",desc:"Building the front-end, back-end, and all features"},
+  {id:"integration",label:"Integration",icon:"\u{1F517}",desc:"Connecting databases, payments, APIs, and services"},
+  {id:"testing",label:"Testing & QA",icon:"\u{1F9EA}",desc:"Checking every feature for quality, bugs, and security"},
+  {id:"review",label:"Client Review (UAT)",icon:"\u{1F440}",desc:"You test the finished product and request final changes"},
+  {id:"deployment",label:"Deployment",icon:"\u{1F4E6}",desc:"Connecting your domain & hosting and putting it online"},
+  {id:"launch",label:"Launch",icon:"\u{1F680}",desc:"Your project goes live to the world!"},
+  {id:"handover",label:"Handover & Support",icon:"\u{1F91D}",desc:"Training, documentation, and ongoing support"}
+];
+
+var STEPS=[
+  {id:"overview",label:"Project Overview",icon:"\u{1F4CB}"},
+  {id:"contact",label:"Contact & Links",icon:"\u{1F4DE}"},
+  {id:"pages",label:"Pages & Content",icon:"\u{1F4C4}"},
+  {id:"features",label:"Features",icon:"\u2699\uFE0F"},
+  {id:"design",label:"Design & Branding",icon:"\u{1F3A8}"},
+  {id:"technical",label:"Domain & Hosting",icon:"\u{1F310}"},
+  {id:"budget",label:"Budget & Timeline",icon:"\u{1F4B0}"},
+  {id:"final",label:"Final Notes",icon:"\u2705"},
+  {id:"review",label:"Review & Submit",icon:"\u{1F50D}"}
+];
+var COMMON_PAGES=["Home","About Us","Services","Contact","Gallery / Portfolio","Blog / News","FAQ","Testimonials","Team / Staff","Pricing"];
+var EXTRA_PAGES={
+  "School Website":["Admissions","Academics","Teachers","Student Portal","Parents Corner","Calendar","Library","Downloads"],
+  "E-Commerce / Online Store":["Shop / Products","Cart","Checkout","My Account","Order Tracking","Wishlist","Returns Policy"],
+  "Restaurant / Cafe":["Menu","Reservations","Catering","Locations","Online Ordering"],
+  "Real Estate":["Property Listings","Search Properties","Agent Profiles","Mortgage Calculator","Virtual Tours"],
+  "Non-Profit / NGO":["Our Mission","Programs","Donate","Volunteer","Impact Reports","Events"],
+  "SaaS / Web App":["Features","Pricing Plans","Documentation","API Reference","Changelog","Login / Signup"]
+};
+var FEATURES_DEFAULT=["Contact Form","Social Media Links","Newsletter Signup","Search","Live Chat Widget","Google Maps","Analytics"];
+var FEATURES_EXTRA={
+  "School Website":["Admissions Form","Events Calendar","Student Portal Login","Parent Notifications","Downloadable Resources","Multi-Language"],
+  "E-Commerce / Online Store":["Shopping Cart","Payment Gateway","Inventory Management","Discount Codes","Product Reviews","Wishlist"],
+  "Restaurant / Cafe":["Online Menu","Table Reservations","Online Ordering","Delivery Integration","Special Offers"],
+  "Real Estate":["Property Search Filter","Virtual Tours","Mortgage Calculator","Agent Contact Forms","Map Integration"],
+  "Non-Profit / NGO":["Donation System","Volunteer Signup","Event Registration","Impact Counter","Annual Reports"],
+  "SaaS / Web App":["User Authentication","Dashboard","API Integration","Subscription Billing","Admin Panel","Notifications"]
+};
+var SOCIAL_PLATFORMS=["Facebook","Instagram","WhatsApp","YouTube","Twitter / X","LinkedIn","TikTok"];
+var SOCIAL_PLACEHOLDERS={
+  "Facebook":"e.g. facebook.com/yourpage",
+  "Instagram":"e.g. instagram.com/yourhandle",
+  "WhatsApp":"e.g. +250 7XX XXX XXX (WhatsApp number)",
+  "YouTube":"e.g. youtube.com/@yourchannel",
+  "Twitter / X":"e.g. x.com/yourhandle",
+  "LinkedIn":"e.g. linkedin.com/company/yourcompany",
+  "TikTok":"e.g. tiktok.com/@yourhandle"
+};
+
+var IS={width:"100%",padding:"11px 14px",border:"1.5px solid #dfe3f0",borderRadius:10,fontSize:19,color:"#1e2337",background:"#fff",outline:"none",boxSizing:"border-box",fontFamily:"inherit",transition:"border .15s"};
+
+function showSaveToast(){var t=document.getElementById("save-toast");if(t){t.classList.add("show");setTimeout(function(){t.classList.remove("show");},1400);}}
+
+// ── Config helpers (business settings used in email templates) ──
+async function getConfig(key,fallback){try{var r=await window.storage.get("config:"+key);return r&&r.value?r.value:(fallback||"");}catch(ex){return fallback||"";}}
+function openMailto(to,subject,body){var mailto="mailto:"+encodeURIComponent(to||"")+"?subject="+encodeURIComponent(subject||"")+"&body="+encodeURIComponent(body||"");window.open(mailto,"_blank");}
+async function buildCredentialsEmail(client,username){
+  var biz=await getConfig("businessName","Our Team");
+  var link=await getConfig("portalLink","");
+  var support=await getConfig("supportEmail","");
+  var subject="Your Client Portal Login Details — "+biz;
+  var body="Hello "+(client.name||"")+",\n\n"
+    +"Welcome! Your private client portal account has been created. Use the details below to sign in and complete your project brief.\n\n"
+    +"Portal link: "+(link||"[your portal link]")+"\n"
+    +"Username: "+username+"\n"
+    +"Password: "+(client.pw||"")+"\n\n"
+    +"What to do next:\n"
+    +"1. Open the portal link above.\n"
+    +"2. Sign in with your username and password.\n"
+    +"3. Fill in the guided questionnaire — your answers save automatically, so you can pause and continue anytime.\n"
+    +"4. Review and submit when you're ready.\n\n"
+    +"Keep these details safe. You'll use the same login throughout the project to track progress and handle the next steps, including anything related to payment.\n\n"
+    +(support?("Need help? Reply to this email or contact us at "+support+".\n\n"):"")
+    +"Warm regards,\n"+biz;
+  return {subject:subject,body:body};
+}
+async function buildConfirmationEmail(sub){
+  var biz=await getConfig("businessName","Our Team");
+  var link=await getConfig("portalLink","");
+  var support=await getConfig("supportEmail","");
+  var subject="We've received your project brief — "+biz;
+  var body="Hello "+(sub.clientName||sub.username||"")+",\n\n"
+    +"Thank you! We've successfully received your project brief"+(sub.project?(" for your "+sub.project):"")+", submitted on "+new Date(sub.at).toLocaleString()+".\n\n"
+    +"This is an automated confirmation to let you know it arrived safely. Our team will now review your requirements and get back to you with the next steps.\n\n"
+    +"You can keep track of your project's progress at any time:\n"
+    +"1. Sign in to the portal: "+(link||"[your portal link]")+"\n"
+    +"2. Use the same username and password you already have.\n"
+    +"3. You'll see a live progress tracker and any updates from our team.\n\n"
+    +"The next stages — including anything related to your quote and payment — will be handled through this same login, so there's nothing extra to set up.\n\n"
+    +(support?("Questions in the meantime? Contact us at "+support+".\n\n"):"")
+    +"Warm regards,\n"+biz;
+  return {subject:subject,body:body};
+}
+
+function Field(props){return(<div style={{marginBottom:22}}><label style={{display:"block",fontSize:18,fontWeight:600,color:"#1e2337",marginBottom:5}}>{props.label}{props.required?<span style={{color:"#ef4444"}}> *</span>:null}</label>{props.hint?<p style={{fontSize:16,color:"#7a82a6",margin:"0 0 7px",lineHeight:1.5}}>{props.hint}</p>:null}{props.children}</div>);}
+function TInput(props){return(<Field label={props.label} hint={props.hint} required={props.required}><input type={props.type||"text"} value={props.value||""} onChange={props.onChange} placeholder={props.placeholder||""} style={Object.assign({},IS,props.style||{})} onFocus={function(e){e.target.style.borderColor="var(--brand1)";e.target.style.boxShadow="0 0 0 3px rgba(91,110,245,.1)";}} onBlur={function(e){e.target.style.borderColor="#dfe3f0";e.target.style.boxShadow="none";}}/></Field>);}
+function TArea(props){return(<Field label={props.label} hint={props.hint} required={props.required}><textarea value={props.value||""} onChange={props.onChange} placeholder={props.placeholder||""} rows={props.rows||3} style={Object.assign({},IS,{resize:"vertical"})} onFocus={function(e){e.target.style.borderColor="var(--brand1)";e.target.style.boxShadow="0 0 0 3px rgba(91,110,245,.1)";}} onBlur={function(e){e.target.style.borderColor="#dfe3f0";e.target.style.boxShadow="none";}}/></Field>);}
+
+function Chips(props){
+  var value=props.value||[];
+  var flip=function(v){if(value.includes(v))props.onChange(value.filter(function(x){return x!==v;}));else props.onChange(value.concat([v]));};
+  return(<Field label={props.label} hint={props.hint}><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{props.options.map(function(o){var on=value.includes(o);return(<button type="button" key={o} onClick={function(){flip(o);}} style={{padding:"8px 15px",borderRadius:9,fontSize:17,fontWeight:500,cursor:"pointer",border:on?"2px solid var(--brand1)":"1.5px solid #dfe3f0",background:on?"#eef0ff":"#fff",color:on?"var(--brand1)":"#1e2337",transition:"all .12s"}}>{on?"\u2713 ":""}{o}</button>);})}</div></Field>);
+}
+function Radio(props){
+  var value=props.value||"";
+  return(<Field label={props.label} hint={props.hint} required={props.required}><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{props.options.map(function(o){var v=typeof o==="string"?o:o.value;var l=typeof o==="string"?o:o.label;var on=value===v;return(<button type="button" key={v} onClick={function(){props.onChange(v);}} style={{padding:"8px 15px",borderRadius:9,fontSize:17,fontWeight:500,cursor:"pointer",border:on?"2px solid var(--brand1)":"1.5px solid #dfe3f0",background:on?"#eef0ff":"#fff",color:on?"var(--brand1)":"#1e2337",transition:"all .12s"}}>{l}</button>);})}</div></Field>);
+}
+function Uploader(props){
+  var ref=useRef();var files=props.files||[];
+  var handle=function(e){Array.from(e.target.files).forEach(function(f){var r=new FileReader();r.onload=function(){props.onAdd({name:f.name,size:f.size,type:f.type,data:r.result});};r.readAsDataURL(f);});e.target.value="";};
+  return(<Field label={props.label} hint={props.hint}><div onClick={function(){ref.current.click();}} style={{border:"2px dashed #d0d5e8",borderRadius:12,padding:"26px 16px",textAlign:"center",cursor:"pointer",background:"#fafaff",transition:"all .15s"}} onMouseEnter={function(e){e.currentTarget.style.borderColor="var(--brand1)";e.currentTarget.style.background="#f4f5ff";}} onMouseLeave={function(e){e.currentTarget.style.borderColor="#d0d5e8";e.currentTarget.style.background="#fafaff";}}><div style={{fontSize:38}}>{"\u{1F4C1}"}</div><p style={{margin:"5px 0 0",fontSize:17,color:"#7a82a6"}}>Click to upload — PNG, JPG, PDF, DOC up to 5 MB</p><input ref={ref} type="file" multiple onChange={handle} style={{display:"none"}}/></div>{files.length>0?(<div style={{marginTop:9,display:"flex",flexDirection:"column",gap:5}}>{files.map(function(f,i){return(<div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:"#f4f5fb",borderRadius:8,fontSize:17}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"75%"}}>{f.type&&f.type.startsWith("image")?"\u{1F5BC}\uFE0F ":"\u{1F4CE} "}{f.name}</span><button type="button" onClick={function(e){e.stopPropagation();props.onRemove(i);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontWeight:700,fontSize:22}}>x</button></div>);})}</div>):null}</Field>);
+}
+function LogoMark(props){
+  var size=props.size||34;var radius=props.radius||9;
+  var logo=getLogo();
+  if(logo){
+    return <div style={{width:size,height:size,borderRadius:radius,overflow:"hidden",flexShrink:0,boxShadow:props.shadow||"0 2px 8px rgba(0,0,0,.12)",background:"#0d1120",display:"flex",alignItems:"center",justifyContent:"center"}}><img src={logo} alt="logo" style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>;
+  }
+  return <div style={{width:size,height:size,borderRadius:radius,background:"linear-gradient(135deg,var(--brand1),var(--brand2))",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.45,color:"#fff",flexShrink:0,boxShadow:props.shadow||"none"}}>{"\u26A1"}</div>;
+}
+
+function Btn(props){
+  var primary=props.primary;var danger=props.danger;var disabled=props.disabled;
+  var base={padding:"10px 22px",borderRadius:10,fontSize:18.5,fontWeight:600,cursor:disabled?"default":"pointer",border:(primary||danger)?"none":"1.5px solid #dfe3f0",background:danger?"#ef4444":primary?"linear-gradient(135deg,var(--brand1),var(--brand2))":"#fff",color:(primary||danger)?"#fff":"#1e2337",opacity:disabled?0.5:1,transition:"all .15s",boxShadow:primary?"0 4px 14px rgba(91,110,245,.28)":"none"};
+  return(<button onClick={props.onClick} disabled={disabled} style={Object.assign({},base,props.style||{})} onMouseEnter={function(e){if(!disabled&&primary)e.currentTarget.style.transform="translateY(-1px)";}} onMouseLeave={function(e){e.currentTarget.style.transform="translateY(0)";}}>{props.children}</button>);
+}
+function StatusBadge(props){
+  var m={submitted:{bg:"#eff6ff",c:"#2563eb",t:"Submitted"},revision:{bg:"#fef3c7",c:"#d97706",t:"Revision Requested"},approved:{bg:"#f0fdf4",c:"#16a34a",t:"In Progress"},resubmitted:{bg:"#ede9fe",c:"#7c3aed",t:"Resubmitted"}};
+  var s=m[props.status]||m.submitted;
+  return <span style={{fontSize:15,padding:"3px 11px",background:s.bg,color:s.c,borderRadius:7,fontWeight:600}}>{s.t}</span>;
+}
+
+var SEC_LABELS={overview:"Project Overview",contact:"Contact & Links",pages:"Pages & Content",features:"Features",design:"Design & Branding",technical:"Domain & Hosting",budget:"Budget & Timeline",final:"Final Notes"};
+var SEC_ICONS={overview:"\u{1F4CB}",contact:"\u{1F4DE}",pages:"\u{1F4C4}",features:"\u2699\uFE0F",design:"\u{1F3A8}",technical:"\u{1F310}",budget:"\u{1F4B0}",final:"\u2705"};
+// Per-section color themes: bg tint, border, header bar, accent text
+var SEC_THEME={
+  overview:{bg:"#eff4ff",border:"#c7d7fe",bar:"#3b82f6",accent:"#1e40af",shadow:"rgba(59,130,246,.15)"},
+  contact:{bg:"#fff1f2",border:"#fecdd3",bar:"#f43f5e",accent:"#9f1239",shadow:"rgba(244,63,94,.15)"},
+  pages:{bg:"#f0fdf4",border:"#bbf7d0",bar:"#22c55e",accent:"#166534",shadow:"rgba(34,197,94,.15)"},
+  features:{bg:"#fdf4ff",border:"#f5d0fe",bar:"#d946ef",accent:"#86198f",shadow:"rgba(217,70,239,.15)"},
+  design:{bg:"#fff7ed",border:"#fed7aa",bar:"#f97316",accent:"#9a3412",shadow:"rgba(249,115,22,.15)"},
+  technical:{bg:"#ecfeff",border:"#a5f3fc",bar:"#06b6d4",accent:"#155e75",shadow:"rgba(6,182,212,.15)"},
+  budget:{bg:"#fefce8",border:"#fef08a",bar:"#eab308",accent:"#854d0e",shadow:"rgba(234,179,8,.15)"},
+  final:{bg:"#f5f3ff",border:"#ddd6fe",bar:"#8b5cf6",accent:"#5b21b6",shadow:"rgba(139,92,246,.15)"}
+};
+function secTheme(sec){return SEC_THEME[sec]||{bg:"#fafaff",border:"#e6e9f4",bar:"#5b6ef5",accent:"#1e2337",shadow:"rgba(0,0,0,.06)"};}
+
+/* ── PROGRESS TRACKER ── */
+function ProgressTracker(props){
+  var currentStage=props.currentStage||0;var compact=props.compact;
+  var pct=Math.round((currentStage/(MILESTONES.length-1))*100);
+  return(
+    <div style={{background:"linear-gradient(135deg,#1e2337,#2d3454)",borderRadius:16,padding:compact?"18px 20px":"24px 24px",color:"#fff",boxShadow:"0 8px 30px rgba(30,35,55,.25)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div><p style={{margin:0,fontSize:16,color:"#9ca3c4",fontWeight:500,textTransform:"uppercase",letterSpacing:".06em"}}>Project Progress</p><p style={{margin:"3px 0 0",fontSize:compact?16:19,fontWeight:700}}>{MILESTONES[currentStage].icon} {MILESTONES[currentStage].label}</p></div>
+        <div style={{textAlign:"right"}}><div style={{fontSize:compact?22:28,fontWeight:800,background:"linear-gradient(135deg,#8b9aff,#c4b5fd)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>{pct}%</div></div>
+      </div>
+      <div style={{height:6,background:"rgba(255,255,255,.1)",borderRadius:4,marginBottom:20,overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",borderRadius:4,background:"linear-gradient(90deg,var(--brand1),#a78bfa)",transition:"width .6s ease"}}></div></div>
+      <div style={{display:"flex",justifyContent:"flex-start",position:"relative",overflowX:"auto",paddingBottom:4,gap:2}}>
+        {MILESTONES.map(function(m,i){var doneStage=i<currentStage;var active=i===currentStage;return(<div key={m.id} style={{display:"flex",flexDirection:"column",alignItems:"center",position:"relative",zIndex:1,minWidth:compact?56:64,flexShrink:0}}><div style={{width:compact?26:32,height:compact?26:32,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:compact?12:14,marginBottom:6,background:doneStage?"linear-gradient(135deg,#22c55e,#16a34a)":active?"linear-gradient(135deg,var(--brand1),var(--brand2))":"rgba(255,255,255,.08)",border:active?"2px solid #a78bfa":"none",boxShadow:active?"0 0 0 4px rgba(167,139,250,.2)":"none",transition:"all .3s",flexShrink:0}} className={active?"pulse":""}>{doneStage?"\u2713":m.icon}</div><span style={{fontSize:compact?8.5:9.5,fontWeight:active?700:500,color:doneStage?"#86efac":active?"#fff":"#6b7299",textAlign:"center",lineHeight:1.15,maxWidth:compact?52:60,wordBreak:"break-word"}}>{m.label}</span></div>);})}
+      </div>
+      {!compact?(<div style={{marginTop:18,padding:"12px 14px",background:"rgba(255,255,255,.05)",borderRadius:10,fontSize:17,color:"#c7cce0",lineHeight:1.5}}><strong style={{color:"#fff"}}>Current stage:</strong> {MILESTONES[currentStage].desc}</div>):null}
+    </div>
+  );
+}
+
+/* ── PDF ── */
+function generatePDF(s){
+  var jsPDF=window.jspdf.jsPDF;var doc=new jsPDF({unit:"mm",format:"a4"});var y=20;var lm=20;var pw=170;
+  doc.setFillColor(30,35,55);doc.rect(0,0,210,40,"F");
+  doc.setTextColor(255,255,255);doc.setFontSize(20);doc.setFont("helvetica","bold");doc.text("PROJECT BRIEF",lm,18);
+  doc.setFontSize(11);doc.setFont("helvetica","normal");doc.text((s.clientName||s.username)+"  |  "+(s.project||""),lm,27);doc.text("Submitted: "+new Date(s.at).toLocaleString(),lm,34);
+  y=50;doc.setTextColor(30,35,55);
+  var data=s.data||{};
+  Object.keys(data).forEach(function(sec){
+    if(sec==="review")return;var fields=data[sec];var hasContent=false;
+    Object.keys(fields).forEach(function(k){var v=fields[k];if(k==="files")return;if(k==="socialLinks"){if(v&&Object.keys(v).length)hasContent=true;return;}var dd=Array.isArray(v)?v.join(", "):String(v||"");if(dd)hasContent=true;});
+    if(!hasContent)return;
+    if(y>260){doc.addPage();y=20;}
+    doc.setFillColor(91,110,245);doc.rect(lm,y,pw,8,"F");doc.setTextColor(255,255,255);doc.setFontSize(11);doc.setFont("helvetica","bold");doc.text(SEC_LABELS[sec]||sec,lm+4,y+5.5);y+=12;doc.setTextColor(30,35,55);
+    Object.keys(fields).forEach(function(k){
+      var v=fields[k];
+      if(k==="files"){if(Array.isArray(v)&&v.length>0){if(y>270){doc.addPage();y=20;}doc.setFontSize(9);doc.setFont("helvetica","bold");doc.text("Uploaded Files:",lm,y);y+=5;doc.setFont("helvetica","normal");v.forEach(function(f){doc.text("  - "+f.name,lm,y);y+=4.5;});y+=2;}return;}
+      if(k==="socialLinks"){if(v&&Object.keys(v).length){Object.keys(v).forEach(function(plat){if(!v[plat])return;if(y>270){doc.addPage();y=20;}doc.setFontSize(9);doc.setFont("helvetica","bold");doc.setTextColor(100,110,140);doc.text(plat,lm,y);doc.setFont("helvetica","normal");doc.setTextColor(30,35,55);doc.text(String(v[plat]),lm+45,y);y+=6;});}return;}
+      var display=Array.isArray(v)?v.join(", "):String(v||"");if(!display)return;
+      var label=k.replace(/([A-Z])/g," $1").replace(/^./,function(c){return c.toUpperCase();});
+      if(y>270){doc.addPage();y=20;}
+      doc.setFontSize(9);doc.setFont("helvetica","bold");doc.setTextColor(100,110,140);doc.text(label,lm,y);
+      doc.setFont("helvetica","normal");doc.setTextColor(30,35,55);var lines=doc.splitTextToSize(display,pw-4);doc.text(lines,lm,y+4.5);y+=4.5+(lines.length*4.2)+3;
+    });y+=4;
+  });
+  var pageCount=doc.internal.getNumberOfPages();for(var p=1;p<=pageCount;p++){doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);doc.text("Page "+p+" of "+pageCount,lm,290);}
+  doc.save("brief-"+(s.username||"client")+".pdf");
+}
+
+/* helper to render a field value for display */
+function renderFieldValue(k,v){
+  if(k==="socialLinks"){
+    if(!v||!Object.keys(v).length)return null;
+    var entries=Object.keys(v).filter(function(p){return v[p];});
+    if(!entries.length)return null;
+    return entries.map(function(p){return p+": "+v[p];}).join("  |  ");
+  }
+  return Array.isArray(v)?v.join(", "):String(v||"");
+}
+
+/* ── CLIENT BRIEF VIEW (read-only with progress) ── */
+function AccountPanel(props){
+  var user=props.user||{};
+  var _show=useState(false);var show=_show[0];var setShow=_show[1];
+  var _live=useState(user.pw||"");var livePw=_live[0];var setLivePw=_live[1];
+  // Re-read latest password from storage (admin may have changed it)
+  useEffect(function(){(async function(){try{var r=await window.storage.get("cl:"+user.username);if(r){var c=JSON.parse(r.value);if(c.pw)setLivePw(c.pw);}}catch(ex){}})();},[user.username]);
+  var copy=function(txt){try{navigator.clipboard.writeText(txt);}catch(ex){}};
+  return(
+    <div style={{background:"#fff",borderRadius:16,padding:24,border:"1px solid #e6e9f4"}}>
+      <h3 style={{margin:"0 0 5px",fontSize:20,color:"#1e2337"}}>{"\u{1F511}"} My Login Details</h3>
+      <p style={{margin:"0 0 18px",fontSize:17,color:"#7a82a6",lineHeight:1.55}}>Keep these safe — you'll use them every time you return to track your project and handle the next steps. If your project manager updates your password, the latest one shows here.</p>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{padding:"14px 16px",background:"#f8f9fc",borderRadius:11,border:"1px solid #eef0f7"}}>
+          <div style={{fontSize:14,color:"#7a82a6",fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:".04em"}}>Username</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}><span style={{fontSize:19,fontWeight:600,color:"#1e2337"}}>{user.username}</span><button onClick={function(){copy(user.username);}} style={{background:"none",border:"1.5px solid #dfe3f0",borderRadius:8,padding:"5px 12px",fontSize:14,cursor:"pointer",color:"#5b6ef5",fontWeight:600}}>Copy</button></div>
+        </div>
+        <div style={{padding:"14px 16px",background:"#f8f9fc",borderRadius:11,border:"1px solid #eef0f7"}}>
+          <div style={{fontSize:14,color:"#7a82a6",fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:".04em"}}>Password</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}><span style={{fontSize:19,fontWeight:600,color:"#1e2337",fontFamily:"monospace",letterSpacing:".05em"}}>{show?livePw:"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}</span><div style={{display:"flex",gap:6}}><button onClick={function(){setShow(!show);}} style={{background:"none",border:"1.5px solid #dfe3f0",borderRadius:8,padding:"5px 12px",fontSize:14,cursor:"pointer",color:"#1e2337",fontWeight:600}}>{show?"Hide":"Show"}</button><button onClick={function(){copy(livePw);}} style={{background:"none",border:"1.5px solid #dfe3f0",borderRadius:8,padding:"5px 12px",fontSize:14,cursor:"pointer",color:"#5b6ef5",fontWeight:600}}>Copy</button></div></div>
+        </div>
+      </div>
+      <div style={{marginTop:16,padding:"12px 14px",background:"#eff6ff",borderRadius:10,fontSize:15,color:"#1e40af",lineHeight:1.5}}>{"\u2139\uFE0F"} Forgot your password later? Use the "Forgot your login details?" link on the sign-in screen, or contact us directly and we'll help you recover access.</div>
+    </div>
+  );
+}
+
+function BriefReadOnly(props){
+  var sub=props.sub;var onOut=props.onOut;
+  var _tab=useState("progress");var tab=_tab[0];var setTab=_tab[1];
+  var stage=sub.progressStage||0;var updates=sub.progressUpdates||[];
+  return(
+    <div style={{minHeight:"100vh",background:"#f3f4fa",fontFamily:"Inter,-apple-system,sans-serif"}}>
+      <header style={{background:"#fff",borderBottom:"1px solid #e6e9f4",height:60,padding:"0 18px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}><LogoMark size={34} radius={9}/><div><div style={{fontWeight:700,fontSize:19,color:"#1e2337"}}>My Project</div><div style={{fontSize:15,color:"#7a82a6"}}>{sub.clientName||sub.username}</div></div></div>
+        <Btn onClick={onOut} style={{fontSize:16,padding:"6px 14px"}}>Sign Out</Btn>
+      </header>
+      <div style={{maxWidth:700,margin:"0 auto",padding:"22px 16px 44px"}} className="fade-up">
+        <div style={{background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)",border:"1px solid #bbf7d0",borderRadius:14,padding:"16px 18px",marginBottom:18,display:"flex",gap:12,alignItems:"flex-start"}}>
+          <span style={{fontSize:30}}>{"\u2705"}</span>
+          <div>
+            <p style={{margin:"0 0 4px",fontSize:19,fontWeight:700,color:"#166534"}}>Your brief has been received</p>
+            <p style={{margin:0,fontSize:17,color:"#15803d",lineHeight:1.55}}>A confirmation email is on its way to you. Our team will review your requirements and reach out with the next steps. You can return to this page anytime with the same login to follow your project's progress — including everything related to your quote and payment.</p>
+          </div>
+        </div>
+        <ProgressTracker currentStage={stage}/>
+        <div style={{display:"flex",gap:6,background:"#fff",padding:6,borderRadius:13,border:"1px solid #e6e9f4",margin:"20px 0"}}>
+          <button onClick={function(){setTab("progress");}} style={{flex:1,padding:"10px",fontSize:18,fontWeight:600,border:"none",borderRadius:9,cursor:"pointer",background:tab==="progress"?"var(--brand1)":"transparent",color:tab==="progress"?"#fff":"#7a82a6"}}>Updates ({updates.length})</button>
+          <button onClick={function(){setTab("brief");}} style={{flex:1,padding:"10px",fontSize:18,fontWeight:600,border:"none",borderRadius:9,cursor:"pointer",background:tab==="brief"?"var(--brand1)":"transparent",color:tab==="brief"?"#fff":"#7a82a6"}}>My Brief</button>
+          <button onClick={function(){setTab("account");}} style={{flex:1,padding:"10px",fontSize:18,fontWeight:600,border:"none",borderRadius:9,cursor:"pointer",background:tab==="account"?"var(--brand1)":"transparent",color:tab==="account"?"#fff":"#7a82a6"}}>My Login</button>
+        </div>
+        {tab==="progress"?(<div className="fade-up">{updates.length===0?(<div style={{background:"#fff",borderRadius:14,padding:"40px 20px",textAlign:"center",border:"1px solid #e6e9f4"}}><p style={{fontSize:41,margin:"0 0 8px"}}>{"\u{1F4EC}"}</p><p style={{color:"#1e2337",fontSize:19,fontWeight:600,margin:"0 0 4px"}}>No updates yet</p><p style={{color:"#7a82a6",fontSize:18,margin:0,lineHeight:1.5}}>Your project manager will post progress updates here as work moves forward.</p></div>):(<div style={{position:"relative",paddingLeft:8}}>{updates.slice().reverse().map(function(up,i){return(<div key={i} style={{position:"relative",paddingLeft:24,paddingBottom:18}}><div style={{position:"absolute",left:0,top:4,width:12,height:12,borderRadius:"50%",background:i===0?"linear-gradient(135deg,var(--brand1),var(--brand2))":"#cbd2e8",border:"2px solid #fff",boxShadow:"0 0 0 2px "+(i===0?"#c4b5fd":"#e6e9f4")}}></div>{i<updates.length-1?<div style={{position:"absolute",left:5,top:16,bottom:0,width:2,background:"#e6e9f4"}}></div>:null}<div style={{background:"#fff",borderRadius:12,padding:"14px 16px",border:"1px solid #e6e9f4"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:18,fontWeight:600,color:"var(--brand1)"}}>{up.stageLabel||"Update"}</span><span style={{fontSize:15,color:"#9ca3c4"}}>{new Date(up.at).toLocaleDateString()}</span></div><p style={{margin:0,fontSize:18,color:"#1e2337",lineHeight:1.55}}>{up.message}</p></div></div>);})}</div>)}</div>):null}
+        {tab==="brief"?(<div className="fade-up"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><h3 style={{margin:0,fontSize:20,color:"#1e2337"}}>Your Submitted Brief</h3><Btn primary onClick={function(){generatePDF(sub);}} style={{fontSize:17,padding:"8px 16px"}}>Download PDF</Btn></div>{["overview","contact","pages","features","design","technical","budget","final"].map(function(sec){var fields=sub.data[sec]||{};var hasContent=false;Object.keys(fields).forEach(function(k){var rv=renderFieldValue(k,fields[k]);if(k==="files"){if(Array.isArray(fields[k])&&fields[k].length>0)hasContent=true;}else if(rv)hasContent=true;});if(!hasContent)return null;var th=secTheme(sec);return(<div key={sec} style={{background:th.bg,borderRadius:14,padding:0,border:"1px solid "+th.border,marginBottom:14,overflow:"hidden",boxShadow:"0 4px 16px "+th.shadow}}><div style={{height:5,background:th.bar}}></div><div style={{padding:"16px 18px"}}><h4 style={{fontSize:18.5,color:th.accent,margin:"0 0 11px",display:"flex",alignItems:"center",gap:6,fontWeight:700}}>{SEC_ICONS[sec]} {SEC_LABELS[sec]}</h4>{Object.keys(fields).map(function(k){var v=fields[k];if(k==="files"&&Array.isArray(v)&&v.length>0){return(<div key={k} style={{marginBottom:6}}>{v.map(function(f,idx){return(<div key={idx} style={{fontSize:17,color:"#1e2337"}}>{"\u{1F4CE} "+f.name}</div>);})}</div>);}var display=renderFieldValue(k,v);if(!display)return null;var label=k.replace(/([A-Z])/g," $1").replace(/^./,function(c){return c.toUpperCase();});return(<div key={k} style={{display:"flex",gap:8,marginBottom:7,fontSize:18,lineHeight:1.5}}><span style={{color:th.accent,minWidth:145,fontWeight:600,flexShrink:0,opacity:.75}}>{label}</span><span style={{color:"#1e2337"}}>{display}</span></div>);})}</div></div>);})}</div>):null}
+        {tab==="account"?(<div className="fade-up"><AccountPanel user={props.user} sub={sub}/></div>):null}
+      </div>
+    </div>
+  );
+}
+
+/* ── LOGIN ── */
+function Login(props){
+  var onAuth=props.onAuth;
+  var _u=useState("");var u=_u[0];var setU=_u[1];
+  var _p=useState("");var pw=_p[0];var setPw=_p[1];
+  var _e=useState("");var err=_e[0];var setErr=_e[1];
+  var _b=useState(false);var busy=_b[0];var setBusy=_b[1];
+  var _forgot=useState(false);var forgot=_forgot[0];var setForgot=_forgot[1];
+  var _fEmail=useState("");var fEmail=_fEmail[0];var setFEmail=_fEmail[1];
+  var _fMsg=useState("");var fMsg=_fMsg[0];var setFMsg=_fMsg[1];
+  var go=async function(){
+    setErr("");if(!u||!pw){setErr("Enter both username and password.");return;}
+    setBusy(true);await new Promise(function(r){setTimeout(r,500);});
+    if(u===ADMIN.user){var ap=await getAdminPass();if(ap===null){await window.storage.set("config:adminPass",pw);onAuth({role:"admin",username:u});setBusy(false);return;}if(pw===ap){onAuth({role:"admin",username:u});setBusy(false);return;}}
+    try{var r=await window.storage.get("cl:"+u);if(r){var c=JSON.parse(r.value);if(c.pw===pw){onAuth({role:"client",username:u,name:c.name,project:c.project||"",pw:c.pw});setBusy(false);return;}}}catch(ex){}
+    setErr("Invalid credentials. Contact your project manager.");setBusy(false);
+  };
+  var sendRecovery=async function(){
+    if(!fEmail.trim()){setFMsg("Please enter your email address.");return;}
+    var biz=await getConfig("businessName","Our Team");
+    var support=await getConfig("supportEmail","");
+    if(!support){setFMsg("Recovery isn't set up yet. Please contact your project manager directly.");return;}
+    var subject="Login help request — Client Portal";
+    var body="Hello "+biz+",\n\nI've forgotten my client portal login details. Please help me recover access.\n\nMy email on file: "+fEmail+"\n\nThank you.";
+    openMailto(support,subject,body);
+    setFMsg("An email request has been opened in your mail app — just press send and our team will help you recover your login.");
+  };
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(150deg,#0d1120,#161b33,#1f2545)",fontFamily:"Inter,-apple-system,sans-serif",padding:16}}>
+      <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}><div style={{position:"absolute",top:"8%",right:"12%",width:380,height:380,borderRadius:"50%",background:"radial-gradient(circle,rgba(91,110,245,.08),transparent 70%)"}}></div><div style={{position:"absolute",bottom:"12%",left:"8%",width:300,height:300,borderRadius:"50%",background:"radial-gradient(circle,rgba(124,92,250,.06),transparent 70%)"}}></div></div>
+      <div style={{width:"100%",maxWidth:410,position:"relative"}} className="fade-up">
+        <div style={{textAlign:"center",marginBottom:34}}><div style={{display:"inline-flex",margin:"0 auto 16px"}}><LogoMark size={64} radius={18} shadow="0 10px 32px rgba(0,0,0,.4)"/></div><h1 style={{color:"#fff",fontSize:30,fontWeight:700,margin:"0 0 6px"}}>Client Portal</h1><p style={{color:"#7a82a6",fontSize:19,margin:0}}>Sign in to your project workspace</p><p style={{color:"#5a6180",fontSize:15,margin:"10px 0 0",lineHeight:1.5}}>Software, web & mobile development — plus trusted technology advice for your business or company.</p></div>
+        <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:"30px 26px",boxShadow:"0 18px 50px rgba(0,0,0,.35)"}}>
+          {err?<div style={{padding:"10px 14px",background:"rgba(239,68,68,.12)",border:"1px solid rgba(239,68,68,.2)",borderRadius:10,marginBottom:18,fontSize:17,color:"#f87171"}}>{err}</div>:null}
+          <div style={{marginBottom:16}}><label style={{display:"block",fontSize:15.5,fontWeight:600,color:"#7a82a6",marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Username</label><input value={u} onChange={function(e){setU(e.target.value);}} placeholder="Your username" onKeyDown={function(e){if(e.key==="Enter")go();}} style={Object.assign({},IS,{background:"rgba(255,255,255,.05)",border:"1.5px solid rgba(255,255,255,.1)",color:"#fff"})} onFocus={function(e){e.target.style.borderColor="var(--brand1)";}} onBlur={function(e){e.target.style.borderColor="rgba(255,255,255,.1)";}}/></div>
+          <div style={{marginBottom:24}}><label style={{display:"block",fontSize:15.5,fontWeight:600,color:"#7a82a6",marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Password</label><input type="password" value={pw} onChange={function(e){setPw(e.target.value);}} placeholder="Your password" onKeyDown={function(e){if(e.key==="Enter")go();}} style={Object.assign({},IS,{background:"rgba(255,255,255,.05)",border:"1.5px solid rgba(255,255,255,.1)",color:"#fff"})} onFocus={function(e){e.target.style.borderColor="var(--brand1)";}} onBlur={function(e){e.target.style.borderColor="rgba(255,255,255,.1)";}}/></div>
+          <Btn primary onClick={go} disabled={busy} style={{width:"100%",padding:"13px",fontSize:19.5}}>{busy?"Signing in...":"Sign In"}</Btn>
+          <p style={{textAlign:"center",marginTop:14}}><button onClick={function(){setForgot(!forgot);setFMsg("");}} style={{background:"none",border:"none",color:"#8b9aff",cursor:"pointer",fontSize:17,fontWeight:500,textDecoration:"underline"}}>Forgot your login details?</button></p>
+          {forgot?(<div style={{marginTop:6,padding:"16px",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12}} className="fade-up">
+            <p style={{margin:"0 0 10px",fontSize:16,color:"#9ca3c4",lineHeight:1.5}}>Enter the email address linked to your account and we'll help you recover your login.</p>
+            {fMsg?<div style={{padding:"8px 11px",background:fMsg.includes("Please")||fMsg.includes("isn't")?"rgba(239,68,68,.12)":"rgba(34,197,94,.12)",borderRadius:8,marginBottom:10,fontSize:16,color:fMsg.includes("Please")||fMsg.includes("isn't")?"#f87171":"#86efac",lineHeight:1.5}}>{fMsg}</div>:null}
+            <input type="email" value={fEmail} onChange={function(e){setFEmail(e.target.value);}} placeholder="your@email.com" style={Object.assign({},IS,{background:"rgba(255,255,255,.05)",border:"1.5px solid rgba(255,255,255,.1)",color:"#fff",marginBottom:10})} onFocus={function(e){e.target.style.borderColor="var(--brand1)";}} onBlur={function(e){e.target.style.borderColor="rgba(255,255,255,.1)";}}/>
+            <Btn primary onClick={sendRecovery} style={{width:"100%",padding:"10px",fontSize:18}}>Request Login Help</Btn>
+          </div>):null}
+          <p style={{textAlign:"center",fontSize:15.5,color:"#4e5578",marginTop:18,lineHeight:1.5}}>Credentials provided by your project manager.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── ADMIN ── */
+function Admin(props){
+  var onOut=props.onOut;
+  var _cl=useState([]);var clients=_cl[0];var setClients=_cl[1];
+  var _su=useState([]);var subs=_su[0];var setSubs=_su[1];
+  var _tb=useState("clients");var tab=_tb[0];var setTab=_tb[1];
+  var _ad=useState(false);var adding=_ad[0];var setAdding=_ad[1];
+  var _nf=useState({name:"",user:"",pw:"",email:"",project:"School Website",customProject:""});var nf=_nf[0];var setNf=_nf[1];
+  var _sv=useState(false);var saving=_sv[0];var setSaving=_sv[1];
+  var _ms=useState("");var msg=_ms[0];var setMsg=_ms[1];
+  var _vs=useState(null);var viewSub=_vs[0];var setViewSub=_vs[1];
+  var _rn=useState("");var revNote=_rn[0];var setRevNote=_rn[1];
+  var _sr=useState(false);var showRevision=_sr[0];var setShowRevision=_sr[1];
+  var _upMsg=useState("");var upMsg=_upMsg[0];var setUpMsg=_upMsg[1];
+  var _notifyEmail=useState("");var notifyEmail=_notifyEmail[0];var setNotifyEmail=_notifyEmail[1];
+  var _bizName=useState("");var bizName=_bizName[0];var setBizName=_bizName[1];
+  var _supportEmail=useState("");var supportEmail=_supportEmail[0];var setSupportEmail=_supportEmail[1];
+  var _portalLink=useState("");var portalLink=_portalLink[0];var setPortalLink=_portalLink[1];
+  var _brand1=useState("#5b6ef5");var brand1=_brand1[0];var setBrand1=_brand1[1];
+  var _logo=useState("");var logo=_logo[0];var setLogo=_logo[1];
+  var _brand2=useState("#7c5cfa");var brand2=_brand2[0];var setBrand2=_brand2[1];
+  var _curPw=useState("");var curPw=_curPw[0];var setCurPw=_curPw[1];
+  var _newPw=useState("");var newPw=_newPw[0];var setNewPw=_newPw[1];
+  var _confPw=useState("");var confPw=_confPw[0];var setConfPw=_confPw[1];
+  var _editClient=useState(null);var editClient=_editClient[0];var setEditClient=_editClient[1];
+
+  var load=useCallback(async function(){
+    try{var ck=await window.storage.list("cl:");var arr=[];if(ck&&ck.keys){for(var i=0;i<ck.keys.length;i++){try{var r=await window.storage.get(ck.keys[i]);if(r)arr.push(Object.assign({id:ck.keys[i]},JSON.parse(r.value)));}catch(ex){}}}setClients(arr);}catch(ex){}
+    try{var sk=await window.storage.list("sub:");var arr2=[];if(sk&&sk.keys){for(var j=0;j<sk.keys.length;j++){try{var r2=await window.storage.get(sk.keys[j]);if(r2)arr2.push(Object.assign({id:sk.keys[j]},JSON.parse(r2.value)));}catch(ex){}}}arr2.sort(function(a,b){return(b.at||"").localeCompare(a.at||"");});setSubs(arr2);}catch(ex){}
+  },[]);
+  useEffect(function(){load();},[load]);
+  useEffect(function(){(async function(){try{var n=await window.storage.get("config:notifyEmail");if(n)setNotifyEmail(n.value);}catch(ex){}try{var b=await window.storage.get("config:businessName");if(b)setBizName(b.value);}catch(ex){}try{var s=await window.storage.get("config:supportEmail");if(s)setSupportEmail(s.value);}catch(ex){}try{var p=await window.storage.get("config:portalLink");if(p)setPortalLink(p.value);}catch(ex){}try{var c1=await window.storage.get("config:brand1");if(c1)setBrand1(c1.value);}catch(ex){}try{var c2=await window.storage.get("config:brand2");if(c2)setBrand2(c2.value);}catch(ex){}})();},[]);
+
+  useEffect(function(){try{setLogo(getLogo());}catch(ex){}},[]);
+  var handleLogoUpload=function(e){var f=e.target.files&&e.target.files[0];if(!f)return;if(f.size>500000){setMsg("Please use a logo under 500 KB.");return;}var r=new FileReader();r.onload=function(){setLogo(r.result);};r.readAsDataURL(f);e.target.value="";};
+  var saveLogo=async function(){try{await window.storage.set("config:logo",logo);setMsg("Logo saved! It now appears across the portal.");}catch(ex){setMsg("Error saving logo.");}};
+  var removeLogo=async function(){try{await window.storage.delete("config:logo");setLogo("");setMsg("Logo removed.");}catch(ex){}};
+
+  var saveSettings=async function(){try{await window.storage.set("config:notifyEmail",notifyEmail);await window.storage.set("config:businessName",bizName);await window.storage.set("config:supportEmail",supportEmail);await window.storage.set("config:portalLink",portalLink);setMsg("Settings saved!");}catch(ex){setMsg("Error saving settings.");}};
+  var saveTheme=async function(){try{await window.storage.set("config:brand1",brand1);await window.storage.set("config:brand2",brand2);applyTheme(brand1,brand2);setMsg("Brand colors saved!");}catch(ex){setMsg("Error saving colors.");}};
+  var previewTheme=function(c1,c2){applyTheme(c1||brand1,c2||brand2);};
+  var resetTheme=async function(){setBrand1("#5b6ef5");setBrand2("#7c5cfa");applyTheme("#5b6ef5","#7c5cfa");try{await window.storage.set("config:brand1","#5b6ef5");await window.storage.set("config:brand2","#7c5cfa");}catch(ex){}setMsg("Colors reset to default.");};
+  var changeAdminPw=async function(){
+    if(!curPw||!newPw||!confPw){setMsg("Fill in all password fields.");return;}
+    var ap=await getAdminPass();
+    if(curPw!==ap){setMsg("Current password is incorrect.");return;}
+    if(newPw!==confPw){setMsg("New passwords do not match.");return;}
+    if(newPw.length<4){setMsg("New password is too short.");return;}
+    try{await window.storage.set("config:adminPass",newPw);setMsg("Admin password changed successfully!");setCurPw("");setNewPw("");setConfPw("");}catch(ex){setMsg("Error changing password.");}
+  };
+  var saveClientEdit=async function(){
+    if(!editClient.name){setMsg("Client name can't be empty.");return;}
+    try{var key=editClient.id;var rec={name:editClient.name,pw:editClient.pw,email:editClient.email,project:editClient.project,created:editClient.created||new Date().toISOString()};await window.storage.set(key,JSON.stringify(rec));setMsg("Client updated!");setEditClient(null);load();}catch(ex){setMsg("Error updating client.");}
+  };
+  var sendCredentials=async function(client){if(!client.email){setMsg("This client has no email on file — add one to send their login details.");return;}var tpl=await buildCredentialsEmail(client,client.id?client.id.slice(3):client.user);openMailto(client.email,tpl.subject,tpl.body);};
+  var markSeen=async function(s){if(s.seen)return;try{var updated=Object.assign({},s,{seen:true});delete updated.id;await window.storage.set(s.id,JSON.stringify(updated));load();}catch(ex){}};
+  var emailClient=function(s){var clientEmail=(s.data&&s.data.contact&&s.data.contact.email)||"";var subj="Regarding your project: "+(s.project||"");var body="Hi "+(s.clientName||s.username)+",\n\n";var mailto="mailto:"+encodeURIComponent(clientEmail)+"?subject="+encodeURIComponent(subj)+"&body="+encodeURIComponent(body);window.open(mailto,"_blank");};
+  var sendConfirmation=async function(s){var clientEmail=(s.data&&s.data.contact&&s.data.contact.email)||"";if(!clientEmail){setMsg("No client email on file for confirmation.");return;}var tpl=await buildConfirmationEmail(s);openMailto(clientEmail,tpl.subject,tpl.body);};
+
+  var save=async function(){
+    if(!nf.name||!nf.user||!nf.pw){setMsg("Fill in name, username, and password.");return;}
+    if(nf.project==="Other (write your own)"&&!nf.customProject.trim()){setMsg("Please describe the custom project type.");return;}
+    setSaving(true);
+    try{var projName=nf.project==="Other (write your own)"?nf.customProject:nf.project;await window.storage.set("cl:"+nf.user,JSON.stringify({name:nf.name,pw:nf.pw,email:nf.email,project:projName,created:new Date().toISOString()}));setMsg("Client \""+nf.name+"\" created!");setNf({name:"",user:"",pw:"",email:"",project:"School Website",customProject:""});setAdding(false);load();}catch(ex){setMsg("Error saving.");}
+    setSaving(false);
+  };
+  var del=async function(id){try{await window.storage.delete(id);load();setMsg("Removed.");}catch(ex){}};
+  var saveSubField=async function(s,changes){var updated=Object.assign({},s,changes);delete updated.id;await window.storage.set(s.id,JSON.stringify(updated));var merged=Object.assign({},s,changes);setViewSub(merged);load();return merged;};
+  var sendBack=async function(s){if(!revNote.trim()){setMsg("Please write a note explaining what to change.");return;}await saveSubField(s,{status:"revision",revisionNote:revNote,revisedAt:new Date().toISOString()});setMsg("Sent back to client.");setShowRevision(false);setRevNote("");setViewSub(null);};
+  var setStage=async function(s,stageIdx){await saveSubField(s,{progressStage:stageIdx,status:"approved"});setMsg("Stage updated to: "+MILESTONES[stageIdx].label);};
+  var postUpdate=async function(s){if(!upMsg.trim()){setMsg("Write an update message first.");return;}var stage=s.progressStage||0;var update={at:new Date().toISOString(),message:upMsg,stageLabel:MILESTONES[stage].label};var updates=(s.progressUpdates||[]).concat([update]);await saveSubField(s,{progressUpdates:updates});setUpMsg("");setMsg("Update posted to client!");};
+
+  return(
+    <div style={{minHeight:"100vh",background:"#f3f4fa",fontFamily:"Inter,-apple-system,sans-serif"}}>
+      <header style={{background:"#fff",borderBottom:"1px solid #e6e9f4",height:60,padding:"0 24px",display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:11}}><LogoMark size={34} radius={9}/><span style={{fontWeight:700,fontSize:22,color:"#1e2337"}}>Admin Dashboard</span></div><Btn onClick={onOut}>Sign Out</Btn></header>
+      <div style={{maxWidth:920,margin:"0 auto",padding:"24px 16px"}}>
+        {msg?(<div style={{padding:"11px 15px",borderRadius:10,marginBottom:16,fontSize:17,background:msg.includes("Error")||msg.includes("Fill")||msg.includes("Please")||msg.includes("Write")?"#fef2f2":"#f0fdf4",color:msg.includes("Error")||msg.includes("Fill")||msg.includes("Please")||msg.includes("Write")?"#dc2626":"#16a34a",border:"1px solid "+(msg.includes("Error")||msg.includes("Fill")||msg.includes("Please")||msg.includes("Write")?"#fecaca":"#bbf7d0"),display:"flex",justifyContent:"space-between",alignItems:"center"}} className="fade-up">{msg}<button onClick={function(){setMsg("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:22}}>x</button></div>):null}
+        {!viewSub?(<div style={{display:"flex",gap:6,background:"#fff",padding:6,borderRadius:13,border:"1px solid #e6e9f4",marginBottom:22}}><button onClick={function(){setTab("clients");}} style={{padding:"10px 22px",fontSize:18,fontWeight:600,border:"none",borderRadius:9,cursor:"pointer",background:tab==="clients"?"var(--brand1)":"transparent",color:tab==="clients"?"#fff":"#7a82a6"}}>Clients ({clients.length})</button><button onClick={function(){setTab("submissions");}} style={{padding:"10px 22px",fontSize:18,fontWeight:600,border:"none",borderRadius:9,cursor:"pointer",background:tab==="submissions"?"var(--brand1)":"transparent",color:tab==="submissions"?"#fff":"#7a82a6",position:"relative"}}>Submissions ({subs.length}){subs.filter(function(x){return x.seen===false;}).length>0?<span style={{position:"absolute",top:2,right:6,minWidth:16,height:16,padding:"0 4px",background:"#ef4444",color:"#fff",borderRadius:8,fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{subs.filter(function(x){return x.seen===false;}).length}</span>:null}</button><button onClick={function(){setTab("settings");}} style={{padding:"10px 22px",fontSize:18,fontWeight:600,border:"none",borderRadius:9,cursor:"pointer",background:tab==="settings"?"var(--brand1)":"transparent",color:tab==="settings"?"#fff":"#7a82a6"}}>Settings</button></div>):null}
+
+        {!viewSub&&tab==="clients"?(<div className="fade-up">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><h2 style={{margin:0,fontSize:24,color:"#1e2337"}}>Client Accounts</h2><Btn primary onClick={function(){setAdding(!adding);}}>+ New Client</Btn></div>
+          {adding?(<div style={{background:"#fff",borderRadius:15,padding:24,marginBottom:16,border:"1px solid #e6e9f4"}} className="fade-up"><h3 style={{margin:"0 0 16px",fontSize:20,color:"#1e2337"}}>Create New Client Login</h3><div className="grid2"><TInput label="Client Name" required value={nf.name} onChange={function(e){setNf(Object.assign({},nf,{name:e.target.value}));}} placeholder="Full name or company"/><TInput label="Email" value={nf.email} onChange={function(e){setNf(Object.assign({},nf,{email:e.target.value}));}} placeholder="client@email.com"/><TInput label="Username" required value={nf.user} onChange={function(e){setNf(Object.assign({},nf,{user:e.target.value}));}} placeholder="login username"/><TInput label="Password" required value={nf.pw} onChange={function(e){setNf(Object.assign({},nf,{pw:e.target.value}));}} placeholder="login password"/></div><Field label="Project Type"><select value={nf.project} onChange={function(e){setNf(Object.assign({},nf,{project:e.target.value}));}} style={IS}>{PROJECT_TYPES.map(function(t){return <option key={t} value={t}>{t}</option>;})}</select></Field>{nf.project==="Other (write your own)"?(<TInput label="Describe the project type" required hint="Tell us what kind of project this is so the questionnaire makes sense." value={nf.customProject} onChange={function(e){setNf(Object.assign({},nf,{customProject:e.target.value}));}} placeholder="e.g. Online learning platform, Church website"/>):null}<div style={{display:"flex",gap:8}}><Btn primary disabled={saving} onClick={save}>{saving?"Saving...":"Create Account"}</Btn><Btn onClick={function(){setAdding(false);}}>Cancel</Btn></div></div>):null}
+          {editClient?(<div style={{background:"#fff",borderRadius:15,padding:24,marginBottom:16,border:"2px solid var(--brand1)"}} className="fade-up"><h3 style={{margin:"0 0 16px",fontSize:20,color:"#1e2337"}}>Edit Client — {editClient.id.slice(3)}</h3><div className="grid2"><TInput label="Client Name" required value={editClient.name} onChange={function(e){setEditClient(Object.assign({},editClient,{name:e.target.value}));}} placeholder="Full name or company"/><TInput label="Email" value={editClient.email} onChange={function(e){setEditClient(Object.assign({},editClient,{email:e.target.value}));}} placeholder="client@email.com"/><TInput label="Password" required hint="Change the client's login password here." value={editClient.pw} onChange={function(e){setEditClient(Object.assign({},editClient,{pw:e.target.value}));}} placeholder="login password"/><div><Field label="Project Type"><select value={editClient.project} onChange={function(e){setEditClient(Object.assign({},editClient,{project:e.target.value}));}} style={IS}>{PROJECT_TYPES.map(function(t){return <option key={t} value={t}>{t}</option>;})}<option value={editClient.project}>{editClient.project}</option></select></Field></div></div><p style={{fontSize:15.5,color:"#7a82a6",margin:"0 0 12px"}}>Note: the username (@{editClient.id.slice(3)}) can't be changed, since it's the client's account ID. To use a different username, create a new client.</p><div style={{display:"flex",gap:8}}><Btn primary onClick={saveClientEdit}>Save Changes</Btn><Btn onClick={function(){sendCredentials(editClient);}} style={{background:"#0ea5e9",color:"#fff",border:"none"}}>Send Updated Login</Btn><Btn onClick={function(){setEditClient(null);}}>Cancel</Btn></div></div>):null}
+          {clients.length===0?(<div style={{background:"#fff",borderRadius:15,padding:"48px 16px",textAlign:"center",border:"1px solid #e6e9f4"}}><p style={{fontSize:43.5,margin:"0 0 8px"}}>{"\u{1F465}"}</p><p style={{color:"#7a82a6",fontSize:19,margin:0}}>No clients yet — create one above.</p></div>):(<div style={{display:"flex",flexDirection:"column",gap:9}}>{clients.map(function(c){return(<div key={c.id} style={{background:"#fff",borderRadius:13,padding:"16px 19px",border:"1px solid #e6e9f4",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}><div><div style={{fontWeight:600,fontSize:19.5,color:"#1e2337"}}>{c.name}</div><div style={{fontSize:16,color:"#7a82a6",marginTop:3}}>@{c.id.slice(3)} · {c.project} · {c.email||"no email"}</div></div><div style={{display:"flex",gap:7,alignItems:"center",flexShrink:0}}><span style={{fontSize:15.5,padding:"4px 10px",background:"#f0fdf4",color:"#16a34a",borderRadius:7,fontWeight:500}}>pw: {c.pw}</span><button onClick={function(){sendCredentials(c);}} title="Email login details to client" style={{background:"#0ea5e9",border:"none",color:"#fff",cursor:"pointer",fontSize:15.5,fontWeight:600,padding:"5px 11px",borderRadius:7}}>Send Login</button><button onClick={function(){setEditClient(Object.assign({},c));}} title="Edit client" style={{background:"var(--brand1)",border:"none",color:"#fff",cursor:"pointer",fontSize:15.5,fontWeight:600,padding:"5px 11px",borderRadius:7}}>Edit</button><button onClick={function(){del(c.id);}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:23}}>{"\u{1F5D1}"}</button></div></div>);})}</div>)}
+        </div>):null}
+
+        {!viewSub&&tab==="submissions"?(<div className="fade-up"><h2 style={{margin:"0 0 16px",fontSize:24,color:"#1e2337"}}>Submissions</h2>{subs.length===0?(<div style={{background:"#fff",borderRadius:15,padding:"48px 16px",textAlign:"center",border:"1px solid #e6e9f4"}}><p style={{fontSize:43.5,margin:"0 0 8px"}}>{"\u{1F4ED}"}</p><p style={{color:"#7a82a6",fontSize:19,margin:0}}>No submissions yet.</p></div>):(<div style={{display:"flex",flexDirection:"column",gap:9}}>{subs.map(function(s){var stg=s.progressStage||0;var pc=Math.round((stg/(MILESTONES.length-1))*100);var isNew=s.seen===false;return(<div key={s.id} onClick={function(){markSeen(s);setViewSub(s);setShowRevision(false);setRevNote("");}} style={{background:"#fff",borderRadius:13,padding:"16px 19px",border:isNew?"1.5px solid var(--brand1)":"1px solid #e6e9f4",cursor:"pointer",transition:"all .15s",position:"relative"}} onMouseEnter={function(e){e.currentTarget.style.borderColor="var(--brand1)";e.currentTarget.style.transform="translateY(-1px)";}} onMouseLeave={function(e){e.currentTarget.style.borderColor=isNew?"var(--brand1)":"#e6e9f4";e.currentTarget.style.transform="translateY(0)";}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontWeight:600,fontSize:19.5,color:"#1e2337"}}>{s.clientName||s.username}</span><StatusBadge status={s.status||"submitted"}/>{isNew?<span style={{fontSize:14,fontWeight:700,color:"#fff",background:"#ef4444",padding:"2px 8px",borderRadius:6}}>NEW</span>:null}</div><span style={{fontSize:16,color:"#7a82a6"}}>{s.project||"—"}</span></div><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{flex:1,height:5,background:"#e6e9f4",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:pc+"%",background:"linear-gradient(90deg,var(--brand1),var(--brand2))",borderRadius:3}}></div></div><span style={{fontSize:15,color:"var(--brand1)",fontWeight:600,minWidth:80}}>{MILESTONES[stg].label}</span></div></div>);})}</div>)}</div>):null}
+
+        {!viewSub&&tab==="settings"?(<div className="fade-up">
+          <h2 style={{margin:"0 0 16px",fontSize:24,color:"#1e2337"}}>Settings</h2>
+          <div style={{background:"#fff",borderRadius:15,padding:24,border:"1px solid #e6e9f4",marginBottom:16}}>
+            <h3 style={{margin:"0 0 5px",fontSize:20,color:"#1e2337"}}>{"\u{1F3E2}"} Business Profile</h3>
+            <p style={{margin:"0 0 14px",fontSize:17,color:"#7a82a6",lineHeight:1.6}}>These details personalize the emails sent to your clients (login details, confirmations) and power the "Forgot login" help on the sign-in screen.</p>
+            <div style={{marginBottom:20,padding:"16px",background:"#fafaff",borderRadius:12,border:"1px solid #eef0f7"}}>
+              <label style={{display:"block",fontSize:18,fontWeight:600,color:"#1e2337",marginBottom:8}}>Your Logo</label>
+              <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                <div style={{width:64,height:64,borderRadius:14,overflow:"hidden",background:"#0d1120",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 2px 10px rgba(0,0,0,.15)"}}>{logo?<img src={logo} alt="logo" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{color:"#fff",fontSize:33}}>{"\u26A1"}</span>}</div>
+                <div style={{flex:1,minWidth:200}}>
+                  <p style={{margin:"0 0 8px",fontSize:16,color:"#7a82a6",lineHeight:1.5}}>This logo appears on the login screen and in the header across the admin and client views. Square images work best. Max 500 KB.</p>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <label style={{display:"inline-block",padding:"8px 16px",background:"var(--brand1)",color:"#fff",borderRadius:9,fontSize:18,fontWeight:600,cursor:"pointer"}}>Choose Image<input type="file" accept="image/*" onChange={handleLogoUpload} style={{display:"none"}}/></label>
+                    <Btn primary onClick={saveLogo}>Save Logo</Btn>
+                    {logo?<Btn onClick={removeLogo}>Remove</Btn>:null}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <TInput label="Business / Team name" value={bizName} onChange={function(e){setBizName(e.target.value);}} placeholder="e.g. BrightWeb Studio"/>
+            <TInput label="Support email" type="email" hint="Clients who forget their login will be guided to email this address. Also used as your reply-to in client emails." value={supportEmail} onChange={function(e){setSupportEmail(e.target.value);}} placeholder="e.g. support@yourbusiness.com"/>
+            <TInput label="Portal link" hint="The web address where your clients sign in. Once you host this file online, paste that link here so it's included in client emails." value={portalLink} onChange={function(e){setPortalLink(e.target.value);}} placeholder="e.g. https://portal.yourbusiness.com"/>
+            <TInput label="Notification email (for you)" type="email" hint="Where you get notified when a client submits or resubmits a brief." value={notifyEmail} onChange={function(e){setNotifyEmail(e.target.value);}} placeholder="e.g. you@yourbusiness.com"/>
+            <Btn primary onClick={saveSettings}>Save Settings</Btn>
+            <div style={{marginTop:16,padding:"12px 14px",background:"#eff6ff",borderRadius:10,fontSize:16,color:"#1e40af",lineHeight:1.55}}>{"\u2139\uFE0F"} How emails work: this portal runs in the browser, so it prepares each email with all the details filled in and opens it in your mail app for you to send with one click. For fully automatic emails (sent in the background with no action), the portal connects to an email service once it's hosted online — a quick setup at the deployment stage.</div>
+          </div>
+          <div style={{background:"#fff",borderRadius:15,padding:24,border:"1px solid #e6e9f4",marginBottom:16}}>
+            <h3 style={{margin:"0 0 5px",fontSize:20,color:"#1e2337"}}>{"\u{1F3A8}"} Brand Colors</h3>
+            <p style={{margin:"0 0 16px",fontSize:17,color:"#7a82a6",lineHeight:1.6}}>Customize the colors used across the whole portal — buttons, headers, progress bars, and accents. Pick your two brand colors and the portal updates instantly. This is what your clients see, so make it match your business.</p>
+            <div style={{display:"flex",gap:20,flexWrap:"wrap",marginBottom:16}}>
+              <div>
+                <label style={{display:"block",fontSize:16,fontWeight:600,color:"#1e2337",marginBottom:6}}>Primary color</label>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="color" value={brand1} onChange={function(e){setBrand1(e.target.value);previewTheme(e.target.value,null);}} style={{width:48,height:42,border:"1.5px solid #dfe3f0",borderRadius:10,cursor:"pointer",background:"#fff",padding:2}}/>
+                  <input value={brand1} onChange={function(e){setBrand1(e.target.value);previewTheme(e.target.value,null);}} style={Object.assign({},IS,{width:120})}/>
+                </div>
+              </div>
+              <div>
+                <label style={{display:"block",fontSize:16,fontWeight:600,color:"#1e2337",marginBottom:6}}>Secondary color</label>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="color" value={brand2} onChange={function(e){setBrand2(e.target.value);previewTheme(null,e.target.value);}} style={{width:48,height:42,border:"1.5px solid #dfe3f0",borderRadius:10,cursor:"pointer",background:"#fff",padding:2}}/>
+                  <input value={brand2} onChange={function(e){setBrand2(e.target.value);previewTheme(null,e.target.value);}} style={Object.assign({},IS,{width:120})}/>
+                </div>
+              </div>
+            </div>
+            <div style={{height:48,borderRadius:12,marginBottom:14,background:"linear-gradient(135deg,"+brand1+","+brand2+")",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:600,fontSize:18}}>Live preview of your brand gradient</div>
+            <div style={{display:"flex",gap:8}}>
+              <Btn primary onClick={saveTheme}>Save Brand Colors</Btn>
+              <Btn onClick={resetTheme}>Reset to Default</Btn>
+            </div>
+          </div>
+          <div style={{background:"#fff",borderRadius:15,padding:24,border:"1px solid #e6e9f4"}}>
+            <h3 style={{margin:"0 0 5px",fontSize:20,color:"#1e2337"}}>{"\u{1F511}"} Change Admin Password</h3>
+            <p style={{margin:"0 0 14px",fontSize:17,color:"#7a82a6",lineHeight:1.6}}>Update the password you use to sign in to this admin dashboard. Your username stays <strong>admin</strong>. Choose a strong password and keep it private.</p>
+            <div style={{maxWidth:360}}>
+              <TInput label="Current password" type="password" value={curPw} onChange={function(e){setCurPw(e.target.value);}} placeholder="Enter current password"/>
+              <TInput label="New password" type="password" value={newPw} onChange={function(e){setNewPw(e.target.value);}} placeholder="Enter new password"/>
+              <TInput label="Confirm new password" type="password" value={confPw} onChange={function(e){setConfPw(e.target.value);}} placeholder="Re-enter new password"/>
+            </div>
+            <Btn primary onClick={changeAdminPw}>Change Password</Btn>
+            <div style={{marginTop:14,padding:"11px 13px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:9,fontSize:15.5,color:"#92400e",lineHeight:1.5}}>{"\u26A0\uFE0F"} For your security, no password is stored in the website's code. You set it yourself on first sign-in, and it's kept privately in your browser. If you clear your browser data, the next sign-in as "admin" lets you set a fresh password again.</div>
+          </div>
+        </div>):null}
+
+        {viewSub?(<div className="fade-up">
+          <button onClick={function(){setViewSub(null);}} style={{background:"none",border:"none",color:"var(--brand1)",cursor:"pointer",fontSize:18.5,fontWeight:600,padding:0,marginBottom:16}}>← Back to list</button>
+          <div style={{background:"#fff",borderRadius:16,padding:24,border:"1px solid #e6e9f4",marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:10}}><div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><h2 style={{margin:0,fontSize:26,color:"#1e2337"}}>{viewSub.clientName||viewSub.username}</h2><StatusBadge status={viewSub.status||"submitted"}/></div><p style={{margin:0,fontSize:17,color:"#7a82a6"}}>{viewSub.project} · Submitted {new Date(viewSub.at).toLocaleDateString()}</p></div></div>
+            <ProgressTracker currentStage={viewSub.progressStage||0} compact={true}/>
+            <div style={{marginTop:16}}><p style={{fontSize:17,fontWeight:600,color:"#1e2337",margin:"0 0 8px"}}>Set the current stage:</p><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{MILESTONES.map(function(m,i){var on=(viewSub.progressStage||0)===i;return(<button key={m.id} onClick={function(){setStage(viewSub,i);}} style={{padding:"7px 13px",borderRadius:8,fontSize:15.5,fontWeight:600,cursor:"pointer",border:on?"2px solid var(--brand1)":"1.5px solid #dfe3f0",background:on?"#eef0ff":"#fff",color:on?"var(--brand1)":"#1e2337"}}>{m.icon} {m.label}</button>);})}</div></div>
+          </div>
+          <div style={{background:"#fff",borderRadius:16,padding:24,border:"1px solid #e6e9f4",marginBottom:16}}><h3 style={{margin:"0 0 5px",fontSize:20,color:"#1e2337"}}>Post a Progress Update</h3><p style={{margin:"0 0 12px",fontSize:17,color:"#7a82a6",lineHeight:1.5}}>Write a message to keep your client informed. The current stage ({MILESTONES[viewSub.progressStage||0].label}) is tagged automatically.</p><textarea value={upMsg} onChange={function(e){setUpMsg(e.target.value);}} placeholder="e.g. We've finished the homepage design. You'll get a preview link tomorrow." rows={3} style={IS}/><div style={{marginTop:10}}><Btn primary onClick={function(){postUpdate(viewSub);}}>Post Update to Client</Btn></div>{(viewSub.progressUpdates||[]).length>0?(<div style={{marginTop:16,borderTop:"1px solid #f0f1f7",paddingTop:14}}><p style={{fontSize:16,color:"#7a82a6",fontWeight:600,margin:"0 0 8px"}}>Previous updates ({(viewSub.progressUpdates||[]).length})</p>{viewSub.progressUpdates.slice().reverse().map(function(up,i){return(<div key={i} style={{padding:"8px 12px",background:"#f8f9fc",borderRadius:8,marginBottom:6,fontSize:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{color:"var(--brand1)",fontWeight:600}}>{up.stageLabel}</span><span style={{color:"#9ca3c4"}}>{new Date(up.at).toLocaleDateString()}</span></div><p style={{margin:0,color:"#1e2337",lineHeight:1.4}}>{up.message}</p></div>);})}</div>):null}</div>
+          <div style={{background:"#fff",borderRadius:16,padding:24,border:"1px solid #e6e9f4"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}><h3 style={{margin:0,fontSize:20,color:"#1e2337"}}>Project Brief</h3><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Btn primary onClick={function(){generatePDF(viewSub);}} style={{fontSize:17}}>Download PDF</Btn><Btn onClick={function(){sendConfirmation(viewSub);}} style={{fontSize:17,background:"#16a34a",color:"#fff",border:"none"}}>Send Confirmation</Btn><Btn onClick={function(){emailClient(viewSub);}} style={{fontSize:17,background:"#0ea5e9",color:"#fff",border:"none"}}>Email Client</Btn><Btn onClick={function(){setShowRevision(!showRevision);}} style={{fontSize:17,background:"#f59e0b",color:"#fff",border:"none"}}>Request Changes</Btn></div></div>{showRevision?(<div style={{padding:18,background:"#fffbeb",borderRadius:12,border:"1px solid #fde68a",marginBottom:18}}><label style={{display:"block",fontSize:18,fontWeight:600,color:"#92400e",marginBottom:6}}>What needs to change?</label><textarea value={revNote} onChange={function(e){setRevNote(e.target.value);}} placeholder="Explain what the client should update..." rows={3} style={Object.assign({},IS,{borderColor:"#fde68a"})}/><div style={{display:"flex",gap:8,marginTop:10}}><Btn onClick={function(){sendBack(viewSub);}} style={{background:"#f59e0b",color:"#fff",border:"none",fontSize:17}}>Send Back to Client</Btn><Btn onClick={function(){setShowRevision(false);}} style={{fontSize:17}}>Cancel</Btn></div></div>):null}{viewSub.revisionNote?(<div style={{padding:14,background:"#fffbeb",borderRadius:10,border:"1px solid #fde68a",marginBottom:18,fontSize:17}}><strong style={{color:"#92400e"}}>Revision note sent:</strong><p style={{margin:"4px 0 0",color:"#78350f"}}>{viewSub.revisionNote}</p></div>):null}{["overview","contact","pages","features","design","technical","budget","final"].map(function(sec){var fields=(viewSub.data||{})[sec]||{};var hasContent=false;Object.keys(fields).forEach(function(k){var rv=renderFieldValue(k,fields[k]);if(k==="files"){if(Array.isArray(fields[k])&&fields[k].length>0)hasContent=true;}else if(rv)hasContent=true;});if(!hasContent)return null;return(<div key={sec} style={{marginBottom:20}}><h4 style={{fontSize:19,color:"#1e2337",margin:"0 0 10px",paddingBottom:7,borderBottom:"1px solid #f0f1f7"}}>{SEC_ICONS[sec]} {SEC_LABELS[sec]}</h4>{Object.keys(fields).map(function(k){var v=fields[k];if(k==="files"&&Array.isArray(v)&&v.length>0){return(<div key={k} style={{marginBottom:8}}><span style={{fontSize:16,color:"#7a82a6",fontWeight:600}}>Files</span>{v.map(function(f,i){return(<div key={i} style={{fontSize:17,color:"#1e2337",marginTop:3}}>{"\u{1F4CE} "+f.name}{f.data&&f.type&&f.type.startsWith("image")?<img src={f.data} alt="" style={{display:"block",maxWidth:170,marginTop:5,borderRadius:6}}/>:null}</div>);})}</div>);}var display=renderFieldValue(k,v);if(!display)return null;var label=k.replace(/([A-Z])/g," $1").replace(/^./,function(c){return c.toUpperCase();});return(<div key={k} style={{display:"flex",gap:8,marginBottom:6,fontSize:17,lineHeight:1.5}}><span style={{color:"#7a82a6",minWidth:160,fontWeight:500,flexShrink:0}}>{label}</span><span style={{color:"#1e2337"}}>{display}</span></div>);})}</div>);})}</div>
+        </div>):null}
+      </div>
+    </div>
+  );
+}
+
+/* ── CLIENT QUESTIONNAIRE ── */
+function Questionnaire(props){
+  var user=props.user;var onOut=props.onOut;var pType=user.project||"";
+  var _step=useState(0);var step=_step[0];var setStep=_step[1];
+  var _done=useState(false);var done=_done[0];var setDone=_done[1];
+  var _busy=useState(false);var busy=_busy[0];var setBusy=_busy[1];
+  var _status=useState("");var status=_status[0];var setStatus=_status[1];
+  var _revNote=useState("");var revisionNote=_revNote[0];var setRevisionNote=_revNote[1];
+  var _subData=useState(null);var subData=_subData[0];var setSubData=_subData[1];
+
+  var emptyData={
+    overview:{orgName:"",tagline:"",description:"",goals:"",targetAudience:"",projectType:pType},
+    contact:{contactName:"",phone:"",whatsapp:"",email:"",altEmail:"",address:"",city:"",country:"",existingWebsite:"",socialPlatforms:[],socialLinks:{},bestContactTime:""},
+    pages:{selectedPages:[],extraPages:"",contentReady:"",writeHelp:"",hasMedia:"",files:[]},
+    features:{selected:[],otherFeatures:""},
+    design:{style:"",colors:"",logo:"",exampleSites:"",mobileFirst:"",animations:"",files:[]},
+    technical:{hasDomain:"",domainName:"",hasHosting:"",hostingProvider:"",contactEmail:"",otherEmails:""},
+    budget:{range:"",payment:"",currency:"",customCurrency:"",deadline:"",priority:"",addons:[],ongoingUnderstood:"",hostingPlan:"",maintenancePlan:"",prepayPeriod:"",notes:""},
+    final:{mustHave:"",dontWant:"",additionalNotes:"",referral:""}
+  };
+  var _d=useState(emptyData);var d=_d[0];var setD=_d[1];
+
+  useEffect(function(){
+    (async function(){
+      try{var r=await window.storage.get("sub:"+user.username);if(r){var sub=JSON.parse(r.value);if(sub.status==="revision"){setStatus("revision");setRevisionNote(sub.revisionNote||"");setD(Object.assign({},emptyData,sub.data));return;}else{setSubData(sub);setDone(true);setStatus(sub.status||"submitted");return;}}}catch(ex){}
+      try{var draft=await window.storage.get("draft:"+user.username);if(draft){var parsed=JSON.parse(draft.value);setD(Object.assign({},emptyData,parsed.data));if(parsed.step!==undefined)setStep(parsed.step);}}catch(ex){}
+    })();
+  },[user.username]);
+
+  var saveDraft=function(newData,newStep){try{localStorage.setItem("cp_draft:"+user.username,JSON.stringify({data:newData||d,step:newStep!==undefined?newStep:step,savedAt:new Date().toISOString()}));showSaveToast();}catch(ex){}};
+  var upd=function(sec,key,val){setD(function(p){var ns=Object.assign({},p[sec]);ns[key]=val;var nd=Object.assign({},p);nd[sec]=ns;saveDraft(nd);return nd;});};
+  var updSocialLink=function(platform,val){setD(function(p){var ns=Object.assign({},p.contact);var links=Object.assign({},ns.socialLinks);links[platform]=val;ns.socialLinks=links;var nd=Object.assign({},p);nd.contact=ns;saveDraft(nd);return nd;});};
+  var toggleSocialPlatform=function(platform){setD(function(p){var ns=Object.assign({},p.contact);var plats=ns.socialPlatforms||[];if(plats.includes(platform)){ns.socialPlatforms=plats.filter(function(x){return x!==platform;});}else{ns.socialPlatforms=plats.concat([platform]);}var nd=Object.assign({},p);nd.contact=ns;saveDraft(nd);return nd;});};
+  var addFile=function(sec,f){setD(function(p){var ns=Object.assign({},p[sec]);ns.files=(ns.files||[]).concat([f]);var nd=Object.assign({},p);nd[sec]=ns;saveDraft(nd);return nd;});};
+  var rmFile=function(sec,idx){setD(function(p){var ns=Object.assign({},p[sec]);ns.files=ns.files.filter(function(_,j){return j!==idx;});var nd=Object.assign({},p);nd[sec]=ns;saveDraft(nd);return nd;});};
+  var goStep=function(i){setStep(i);saveDraft(d,i);};
+
+  var submit=async function(){
+    setBusy(true);
+    try{var subStatus=status==="revision"?"resubmitted":"submitted";var existing=null;try{var er=await window.storage.get("sub:"+user.username);if(er)existing=JSON.parse(er.value);}catch(ex){}var sub={username:user.username,clientName:user.name,project:pType,at:new Date().toISOString(),data:d,status:subStatus,progressStage:existing?existing.progressStage||0:0,progressUpdates:existing?existing.progressUpdates||[]:[],seen:false};await window.storage.set("sub:"+user.username,JSON.stringify(sub));try{await window.storage.delete("draft:"+user.username);}catch(ex){}
+      // Attempt email notification to admin if configured
+      try{var nrec=await window.storage.get("config:notifyEmail");if(nrec&&nrec.value){var body="New project brief "+(subStatus==="resubmitted"?"(resubmitted) ":"")+"from "+(user.name||user.username)+" ("+pType+") submitted on "+new Date().toLocaleString()+". Log in to the admin dashboard to review it.";var mailto="mailto:"+encodeURIComponent(nrec.value)+"?subject="+encodeURIComponent("New brief: "+(user.name||user.username))+"&body="+encodeURIComponent(body);var win=window.open(mailto,"_blank");}}catch(ex){}
+      setSubData(sub);setDone(true);setStatus(subStatus);}catch(ex){alert("Submission failed.");}
+    setBusy(false);
+  };
+
+  if(done&&subData){return <BriefReadOnly sub={subData} user={user} onOut={onOut}/>;}
+
+  var cur=STEPS[step];var pct=((step+1)/STEPS.length)*100;
+  var pageOpts=COMMON_PAGES.concat(EXTRA_PAGES[pType]||[]);
+  var featExtra=FEATURES_EXTRA[pType]||[];var featOpts=featExtra.concat(FEATURES_DEFAULT);
+  var seen={};featOpts=featOpts.filter(function(x){if(seen[x])return false;seen[x]=true;return true;});
+
+  var designOptions=[{v:"modern",l:"Modern & Clean",desc:"Minimal layout with bold fonts and plenty of whitespace."},{v:"classic",l:"Classic & Elegant",desc:"Traditional look with refined colors and serif fonts."},{v:"vibrant",l:"Vibrant & Playful",desc:"Bright colors and energetic feel. Great for schools or creative brands."},{v:"corporate",l:"Professional & Formal",desc:"Structured, business-like. Ideal for corporate sites or colleges."}];
+
+  var renderReview=function(){
+    var sections=["overview","contact","pages","features","design","technical","budget","final"];
+    return(<div>
+      {revisionNote?(<div style={{padding:16,background:"#fef3c7",borderRadius:12,border:"1px solid #fde68a",marginBottom:20}}><p style={{margin:0,fontSize:18,fontWeight:600,color:"#92400e"}}>Your project manager requested these changes:</p><p style={{margin:"6px 0 0",fontSize:18,color:"#78350f",lineHeight:1.5}}>{revisionNote}</p></div>):null}
+      <div style={{padding:16,background:"#eff6ff",borderRadius:12,border:"1px solid #bfdbfe",marginBottom:20}}><p style={{margin:0,fontSize:18,color:"#1e40af",lineHeight:1.6}}>Review your answers below. Click <strong>Edit</strong> to fix anything. When ready, click <strong>Confirm & Submit</strong>.</p></div>
+      {sections.map(function(sec){var fields=d[sec]||{};var hasContent=false;Object.keys(fields).forEach(function(k){var rv=renderFieldValue(k,fields[k]);if(k==="files"){if(Array.isArray(fields[k])&&fields[k].length>0)hasContent=true;}else if(rv)hasContent=true;});return(<div key={sec} style={{marginBottom:14,padding:0,background:secTheme(sec).bg,borderRadius:12,border:"1px solid "+secTheme(sec).border,overflow:"hidden",boxShadow:"0 4px 14px "+secTheme(sec).shadow}}><div style={{height:4,background:secTheme(sec).bar}}></div><div style={{padding:16}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:hasContent?10:0}}><h3 style={{margin:0,fontSize:19,color:secTheme(sec).accent,fontWeight:700}}>{SEC_ICONS[sec]} {SEC_LABELS[sec]}</h3><button onClick={function(){var idx=sections.indexOf(sec);goStep(idx);}} style={{background:secTheme(sec).bar,border:"none",color:"#fff",cursor:"pointer",fontSize:14,fontWeight:600,padding:"4px 12px",borderRadius:7}}>Edit</button></div>{!hasContent?<p style={{margin:"6px 0 0",fontSize:17,color:"#a0a6c4",fontStyle:"italic"}}>No answers yet — click Edit</p>:null}{Object.keys(fields).map(function(k){var v=fields[k];if(k==="files"&&Array.isArray(v)&&v.length>0){return(<div key={k} style={{marginBottom:4}}>{v.map(function(f,i){return <div key={i} style={{fontSize:16,color:"#1e2337"}}>{"\u{1F4CE} "+f.name}</div>;})}</div>);}var display=renderFieldValue(k,v);if(!display)return null;var label=k.replace(/([A-Z])/g," $1").replace(/^./,function(c){return c.toUpperCase();});return(<div key={k} style={{display:"flex",gap:6,marginBottom:4,fontSize:17}}><span style={{color:secTheme(sec).accent,minWidth:140,fontWeight:600,opacity:.75}}>{label}:</span><span style={{color:"#1e2337"}}>{display}</span></div>);})}</div></div>);})}
+    </div>);
+  };
+
+  return(
+    <div style={{minHeight:"100vh",background:"#f3f4fa",fontFamily:"Inter,-apple-system,sans-serif"}}>
+      <header style={{background:"#fff",borderBottom:"1px solid #e6e9f4",height:56,padding:"0 18px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}><div style={{display:"flex",alignItems:"center",gap:9}}><LogoMark size={30} radius={8}/><div><div style={{fontWeight:700,fontSize:18.5,color:"#1e2337",lineHeight:1.2}}>Project Brief</div><div style={{fontSize:15,color:"#7a82a6"}}>Hi, {user.name||user.username}</div></div></div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:15,color:"#16a34a",background:"#f0fdf4",padding:"3px 10px",borderRadius:7,fontWeight:500}}>Auto-saving</span><Btn onClick={onOut} style={{fontSize:15.5,padding:"5px 12px"}}>Sign Out</Btn></div></header>
+
+      <div style={{background:"linear-gradient(90deg,#eff6ff,#eef0ff)",padding:"10px 18px",borderBottom:"1px solid #dbeafe",fontSize:17,color:"#3b82f6",display:"flex",alignItems:"center",gap:8}}><span>{"\u{1F4BE}"}</span><span>Your progress is saved automatically. Take a break anytime — just log back in to continue.</span></div>
+      {status==="revision"?(<div style={{background:"#fef3c7",padding:"10px 18px",borderBottom:"1px solid #fde68a",fontSize:17,color:"#92400e",display:"flex",alignItems:"center",gap:8}}><span>{"\u{1F4DD}"}</span><span><strong>Changes requested:</strong> Please update your answers and resubmit. Details are on the Review step.</span></div>):null}
+
+      <div style={{background:"#fff",padding:"12px 18px 16px",borderBottom:"1px solid #e6e9f4"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:16,fontWeight:600,color:"var(--brand1)"}}>Step {step+1} of {STEPS.length}</span><span style={{fontSize:16,color:"#7a82a6"}}>{Math.round(pct)}%</span></div><div style={{height:5,background:"#e6e9f4",borderRadius:3}}><div style={{height:"100%",width:pct+"%",borderRadius:3,background:"linear-gradient(90deg,var(--brand1),var(--brand2))",transition:"width .35s"}}></div></div><div style={{display:"flex",gap:4,marginTop:10,overflowX:"auto",paddingBottom:2}}>{STEPS.map(function(s,i){return(<button key={s.id} onClick={function(){goStep(i);}} style={{padding:"5px 10px",borderRadius:7,fontSize:15,fontWeight:600,border:"none",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,background:i===step?"var(--brand1)":i<step?"#dfe3ff":"#f0f1f7",color:i===step?"#fff":i<step?"var(--brand1)":"#a0a6c4"}}>{s.icon} {s.label}</button>);})}</div></div>
+
+      <div style={{maxWidth:640,margin:"0 auto",padding:"20px 16px 110px"}} className="fade-up">
+        <div style={{background:"#fff",borderRadius:16,border:"1px solid "+secTheme(cur.id).border,boxShadow:"0 6px 24px "+secTheme(cur.id).shadow,overflow:"hidden"}}>
+          <div style={{height:6,background:secTheme(cur.id).bar}}></div>
+          <div style={{background:secTheme(cur.id).bg,padding:"18px 22px",borderBottom:"1px solid "+secTheme(cur.id).border}}>
+            <h2 style={{margin:0,fontSize:24,color:secTheme(cur.id).accent,fontWeight:800}}>{cur.icon} {cur.label}</h2>
+          </div>
+          <div style={{padding:"22px"}}>
+          {cur.id==="overview"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 20px",lineHeight:1.6}}>Let's get to know your organization. This helps us understand who you are and what your website should communicate.</p>
+            <TInput label="What is your organization or business name?" required hint="This appears on your website header, footer, and browser tab. Type the exact spelling you want." value={d.overview.orgName} onChange={function(e){upd("overview","orgName",e.target.value);}} placeholder="e.g. Sunrise International Academy"/>
+            <TInput label="Do you have a tagline or slogan?" hint="A short, memorable phrase. Leave blank if you don't have one." value={d.overview.tagline} onChange={function(e){upd("overview","tagline",e.target.value);}} placeholder="e.g. Building Tomorrow's Leaders"/>
+            <TArea label="Tell us about your organization" required hint="Describe what you do, who you serve, and what makes you unique. Just tell us like you'd tell a friend." value={d.overview.description} onChange={function(e){upd("overview","description",e.target.value);}} placeholder="e.g. We are a private secondary school in Kigali offering Cambridge curriculum..." rows={4}/>
+            <TArea label="What should this website do for you?" hint="What do you want visitors to do? List your top goals." value={d.overview.goals} onChange={function(e){upd("overview","goals",e.target.value);}} placeholder="e.g. 1. Parents can apply online\n2. Showcase our programs\n3. Share news"/>
+            <TInput label="Who will visit your website most?" hint="List the main groups of people who will use your site." value={d.overview.targetAudience} onChange={function(e){upd("overview","targetAudience",e.target.value);}} placeholder="e.g. Parents of prospective students"/>
+          </div>):null}
+
+          {cur.id==="contact"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 20px",lineHeight:1.6}}>We need your contact details so we can reach you throughout the project, and your existing links so we can connect everything correctly. The more accurate this is, the smoother things go.</p>
+            <TInput label="Main contact person" required hint="The person we should communicate with about this project." value={d.contact.contactName} onChange={function(e){upd("contact","contactName",e.target.value);}} placeholder="e.g. John Doe, Marketing Manager"/>
+            <TInput label="Phone number" required type="tel" hint="A number we can call or text. Include your country code." value={d.contact.phone} onChange={function(e){upd("contact","phone",e.target.value);}} placeholder="e.g. +250 7XX XXX XXX"/>
+            <TInput label="WhatsApp number" hint="If different from your phone number, or leave blank if it's the same. WhatsApp is often the fastest way to reach you." value={d.contact.whatsapp} onChange={function(e){upd("contact","whatsapp",e.target.value);}} placeholder="e.g. +250 7XX XXX XXX"/>
+            <TInput label="Email address" required type="email" hint="Your main email for project communication, contracts, and invoices." value={d.contact.email} onChange={function(e){upd("contact","email",e.target.value);}} placeholder="e.g. you@example.com"/>
+            <TInput label="Alternative email" hint="A backup email in case the main one has issues (optional)." value={d.contact.altEmail} onChange={function(e){upd("contact","altEmail",e.target.value);}} placeholder="e.g. backup@example.com"/>
+            <TInput label="Physical address" hint="Your business or organization address. This may appear on your website's contact page and Google Maps." value={d.contact.address} onChange={function(e){upd("contact","address",e.target.value);}} placeholder="e.g. KG 123 St, Kimihurura"/>
+            <div className="grid2">
+              <TInput label="City" value={d.contact.city} onChange={function(e){upd("contact","city",e.target.value);}} placeholder="e.g. Kigali"/>
+              <TInput label="Country" value={d.contact.country} onChange={function(e){upd("contact","country",e.target.value);}} placeholder="e.g. Rwanda"/>
+            </div>
+            <TInput label="Do you have an existing website?" hint="If you currently have a website (even an old one), paste the link. It helps us understand what you have now. Leave blank if this is your first." value={d.contact.existingWebsite} onChange={function(e){upd("contact","existingWebsite",e.target.value);}} placeholder="e.g. https://www.oldsite.com"/>
+
+            {/* Social media with links */}
+            <div style={{marginBottom:22}}>
+              <label style={{display:"block",fontSize:18,fontWeight:600,color:"#1e2337",marginBottom:5}}>Your social media accounts</label>
+              <p style={{fontSize:16,color:"#7a82a6",margin:"0 0 9px",lineHeight:1.5}}>Tap each platform where you have an account. A box will appear for you to paste the link or number — this is what we'll connect your website to.</p>
+              <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:12}}>
+                {SOCIAL_PLATFORMS.map(function(plat){var on=(d.contact.socialPlatforms||[]).includes(plat);return(<button type="button" key={plat} onClick={function(){toggleSocialPlatform(plat);}} style={{padding:"8px 15px",borderRadius:9,fontSize:17,fontWeight:500,cursor:"pointer",border:on?"2px solid var(--brand1)":"1.5px solid #dfe3f0",background:on?"#eef0ff":"#fff",color:on?"var(--brand1)":"#1e2337",transition:"all .12s"}}>{on?"\u2713 ":""}{plat}</button>);})}
+              </div>
+              {(d.contact.socialPlatforms||[]).map(function(plat){return(<div key={plat} style={{marginBottom:10}}><label style={{display:"block",fontSize:16,fontWeight:600,color:"var(--brand1)",marginBottom:4}}>{plat} link / number</label><input value={(d.contact.socialLinks||{})[plat]||""} onChange={function(e){updSocialLink(plat,e.target.value);}} placeholder={SOCIAL_PLACEHOLDERS[plat]} style={IS} onFocus={function(e){e.target.style.borderColor="var(--brand1)";}} onBlur={function(e){e.target.style.borderColor="#dfe3f0";}}/></div>);})}
+            </div>
+
+            <Radio label="Best time to reach you" hint="When are you usually available for a call or message?" options={["Morning","Afternoon","Evening","Anytime"]} value={d.contact.bestContactTime} onChange={function(v){upd("contact","bestContactTime",v);}}/>
+          </div>):null}
+
+          {cur.id==="pages"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 20px",lineHeight:1.6}}>A website is made of different pages, like chapters in a book. Select the ones you need — if unsure, pick the basics and we'll advise.</p>
+            <Chips label="Which pages do you want?" hint="Tap to select each page. You can add or remove pages later during design." options={pageOpts} value={d.pages.selectedPages} onChange={function(v){upd("pages","selectedPages",v);}}/>
+            <TInput label="Any other pages not listed?" hint="Type custom pages, separated by commas." value={d.pages.extraPages} onChange={function(e){upd("pages","extraPages",e.target.value);}} placeholder="e.g. Alumni, Careers"/>
+            <Radio label="Do you have text content ready?" required hint="Content means the words and information on each page. If you don't have it, we can help write it." options={["Yes, all ready","Some pages ready","No, I need help"]} value={d.pages.contentReady} onChange={function(v){upd("pages","contentReady",v);}}/>
+            {(d.pages.contentReady==="No, I need help"||d.pages.contentReady==="Some pages ready")?(<Radio label="Want us to write the content?" hint="Send us rough notes and we'll polish it into website text." options={["Yes, write it for me","I'll send rough notes to polish","I'll write it myself"]} value={d.pages.writeHelp} onChange={function(v){upd("pages","writeHelp",v);}}/>):null}
+            <Radio label="Do you have photos and videos ready?" hint="Good photos make a huge difference. We can guide you if needed." options={["Yes, all ready","I have some","No, I need guidance"]} value={d.pages.hasMedia} onChange={function(v){upd("pages","hasMedia",v);}}/>
+            <Uploader label="Upload any files you have" hint="Logo, photos, brochures, documents — anything that helps us understand your brand." files={d.pages.files} onAdd={function(f){addFile("pages",f);}} onRemove={function(i){rmFile("pages",i);}}/>
+          </div>):null}
+
+          {cur.id==="features"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 20px",lineHeight:1.6}}>Features are interactive things your website can do beyond showing information. Select everything you think you'll need.</p>
+            <Chips label="What should your website be able to do?" hint="Tap each feature you want. If unsure what something means, select it and we'll explain during our review call." options={featOpts} value={d.features.selected} onChange={function(v){upd("features","selected",v);}}/>
+            <TArea label="Any other features or integrations?" hint="Anything else? E.g. booking system, payment gateway, student portal, membership area." value={d.features.otherFeatures} onChange={function(e){upd("features","otherFeatures",e.target.value);}} placeholder="e.g. I need a booking system and integration with our student database"/>
+          </div>):null}
+
+          {cur.id==="design"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 20px",lineHeight:1.6}}>This helps us understand the visual style you want. No wrong answers — pick what feels right, and you can request changes before we finalize.</p>
+            <div style={{marginBottom:22}}><label style={{display:"block",fontSize:18,fontWeight:600,color:"#1e2337",marginBottom:4}}>What design style do you prefer?</label><p style={{fontSize:16,color:"#7a82a6",margin:"0 0 10px",lineHeight:1.5}}>Pick the style that best matches the image you want to project.</p><div className="grid2" style={{gap:9}}>{designOptions.map(function(s){return(<div key={s.v} onClick={function(){upd("design","style",s.v);}} style={{padding:14,borderRadius:11,cursor:"pointer",border:d.design.style===s.v?"2px solid var(--brand1)":"1.5px solid #dfe3f0",background:d.design.style===s.v?"#f0f2ff":"#fff",transition:"all .12s"}}><div style={{fontWeight:600,fontSize:18,color:"#1e2337",marginBottom:3}}>{s.l}</div><div style={{fontSize:15.5,color:"#7a82a6",lineHeight:1.4}}>{s.desc}</div></div>);})}</div></div>
+            <TInput label="What are your brand colors?" hint="Colors representing your organization. Describe in words or paste color codes." value={d.design.colors} onChange={function(e){upd("design","colors",e.target.value);}} placeholder="e.g. Navy blue and gold, or #003366"/>
+            <Radio label="Do you have a logo?" hint="Upload it below if you have one, or we can design one for you." options={["Yes, I have one","No, I need one designed","I have a rough idea"]} value={d.design.logo} onChange={function(v){upd("design","logo",v);}}/>
+            <TArea label="Share 1-3 websites you like" hint="Find websites whose look you admire and paste their addresses. Very helpful for us." value={d.design.exampleSites} onChange={function(e){upd("design","exampleSites",e.target.value);}} placeholder="https://example.com — I like how clean it looks"/>
+            <Radio label="How important is the mobile experience?" hint="Over 70% of people browse on phones. 'Mobile first' is recommended." options={["Mobile first (recommended)","Equal priority","Desktop is more important"]} value={d.design.mobileFirst} onChange={function(v){upd("design","mobileFirst",v);}}/>
+            <Radio label="Do you want animations?" hint="Smooth visual effects when scrolling. Modern but can slow things if overdone." options={["Yes, modern animations","Subtle and minimal","No animations"]} value={d.design.animations} onChange={function(v){upd("design","animations",v);}}/>
+            <Uploader label="Upload your logo or brand materials" hint="Logo (PNG with transparent background is best) or brand guidelines." files={d.design.files} onAdd={function(f){addFile("design",f);}} onRemove={function(i){rmFile("design",i);}}/>
+          </div>):null}
+
+          {cur.id==="technical"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 20px",lineHeight:1.6}}>Don't worry if these feel technical — just answer what you know and we'll handle the rest.</p>
+            <Radio label="Do you own a domain name (web address)?" required hint="The address people type to visit your site, like 'yourschool.com'." options={["Yes, I have one","No, I need to get one","Not sure"]} value={d.technical.hasDomain} onChange={function(v){upd("technical","hasDomain",v);}}/>
+            {d.technical.hasDomain==="Yes, I have one"?<TInput label="What is your domain name?" hint="Type it exactly as purchased." value={d.technical.domainName} onChange={function(e){upd("technical","domainName",e.target.value);}} placeholder="e.g. myschool.com"/>:null}
+            <Radio label="Do you have web hosting?" hint="Hosting is like renting space online for your site files. First website? We can set it up." options={["Yes, I have hosting","No, I need it set up","Not sure"]} value={d.technical.hasHosting} onChange={function(v){upd("technical","hasHosting",v);}}/>
+            {d.technical.hasHosting==="Yes, I have hosting"?<TInput label="Who manages your hosting?" hint="The name of the company or service that keeps your current website online, if you know it. Leave blank if you're not sure." value={d.technical.hostingProvider} onChange={function(e){upd("technical","hostingProvider",e.target.value);}} placeholder="Type the name if you know it"/>:null}
+            <TInput label="Where should website form messages be sent?" required hint="When someone fills a contact form, the message goes to this email." value={d.technical.contactEmail} onChange={function(e){upd("technical","contactEmail",e.target.value);}} placeholder="e.g. info@yourschool.com"/>
+            <TInput label="Any additional recipients for form messages?" hint="Other people who should receive form submissions, separated by commas." value={d.technical.otherEmails} onChange={function(e){upd("technical","otherEmails",e.target.value);}} placeholder="e.g. principal@school.com"/>
+          </div>):null}
+
+          {cur.id==="budget"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 18px",lineHeight:1.6}}>This helps us recommend the right package. All prices are estimates — your final quote depends on the type of website you chose and the features you selected, so a simple site costs less than one with many advanced features. We'll confirm everything before any work begins.</p>
+
+            <div style={{padding:"16px 18px",background:"linear-gradient(135deg,#fff7ed,#fffbeb)",border:"1px solid #fed7aa",borderRadius:12,marginBottom:24}}>
+              <p style={{margin:"0 0 8px",fontSize:18.5,fontWeight:700,color:"#9a3412",display:"flex",alignItems:"center",gap:6}}>{"\u26A0\uFE0F"} Please read: ongoing (recurring) costs</p>
+              <p style={{margin:"0 0 8px",fontSize:17,color:"#7c2d12",lineHeight:1.6}}>Building a website is a one-time cost. But to keep it <strong>live and working</strong>, a few things must be renewed regularly. These are normal for every website and are separate from the design/build fee:</p>
+              <ul style={{margin:"0 0 8px",paddingLeft:18,fontSize:17,color:"#7c2d12",lineHeight:1.7}}>
+                <li><strong>Domain name</strong> (your web address) — renewed periodically (monthly or yearly). If it expires and isn't renewed, your website address stops working.</li>
+                <li><strong>Hosting</strong> (the space that keeps your site online) — paid on an ongoing basis (monthly or yearly). If hosting isn't paid, your website goes offline.</li>
+                <li><strong>Business email</strong> (e.g. you@yourname.com) — if you want custom email, it's a recurring monthly cost per mailbox.</li>
+                <li><strong>Maintenance</strong> (optional) — keeping your site updated, secure, and backed up. You can handle this yourself or pay us monthly to manage it.</li>
+              </ul>
+              <p style={{margin:0,fontSize:17,color:"#7c2d12",lineHeight:1.6}}>We explain all of this clearly so there are no surprises later. You can also <strong>pre-pay for several months or a full year at once</strong> if you prefer not to track monthly renewals.</p>
+            </div>
+
+            <Radio label="Do you understand the ongoing costs above?" required hint="We want to be transparent so there are no problems later. Please confirm you've read the recurring-cost note." options={["Yes, I understand","I have questions — let's discuss"]} value={d.budget.ongoingUnderstood} onChange={function(v){upd("budget","ongoingUnderstood",v);}}/>
+
+            <Radio label="What is your budget range for the build?" required hint="This is for designing and building the website (one-time). Your final quote depends on your chosen website type and features." options={[{value:"basic",label:"$300 - $700 (Basic)"},{value:"standard",label:"$700 - $1,500 (Standard)"},{value:"premium",label:"$1,500 - $3,000 (Premium)"},{value:"enterprise",label:"$3,000+ (Enterprise)"},{value:"discuss",label:"Let's discuss"}]} value={d.budget.range} onChange={function(v){upd("budget","range",v);}}/>
+
+            <Radio label="How would you like to pay for the build?" hint="With 50/50, you pay half to start and half on delivery. We're flexible." options={[{value:"5050",label:"50% upfront, 50% on delivery"},{value:"3parts",label:"3 installments"},{value:"full",label:"Full payment upfront"},{value:"discuss",label:"Let's discuss"}]} value={d.budget.payment} onChange={function(v){upd("budget","payment",v);}}/>
+
+            <Radio label="Preferred currency" hint="Choose the currency you'd like to be quoted and pay in. If yours isn't listed, pick 'Other' and type it below." options={["USD ($)","EUR (\u20AC)","GBP (\u00A3)","AUD (A$)","RWF (FRw)","UGX (USh)","KES (KSh)","Other"]} value={d.budget.currency} onChange={function(v){upd("budget","currency",v);}}/>
+            {d.budget.currency==="Other"?(<TInput label="Which currency?" required hint="Type the currency you'd like to use." value={d.budget.customCurrency} onChange={function(e){upd("budget","customCurrency",e.target.value);}} placeholder="e.g. CAD, ZAR, NGN, TZS"/>):null}
+
+            <Radio label="How would you like to handle hosting & renewals?" hint="To keep your website online, hosting must be paid on an ongoing basis. You can change this later." options={["Pay monthly","Pre-pay for the year (often cheaper)","I'll arrange hosting myself","Not sure - please advise"]} value={d.budget.hostingPlan} onChange={function(v){upd("budget","hostingPlan",v);}}/>
+
+            <Radio label="Would you like us to maintain your website?" hint="Maintenance means we keep your site updated, secure, backed up, and fix issues. It's optional and billed monthly. Without it, you'd handle updates yourself." options={["Yes, monthly maintenance","No, I'll manage it myself","Tell me more first"]} value={d.budget.maintenancePlan} onChange={function(v){upd("budget","maintenancePlan",v);}}/>
+
+            <Radio label="For recurring costs, would you prefer to pre-pay?" hint="Paying several months or a full year upfront means fewer renewals to track and often a better rate. Optional." options={["Monthly","3 months upfront","6 months upfront","1 year upfront","Let's discuss"]} value={d.budget.prepayPeriod} onChange={function(v){upd("budget","prepayPeriod",v);}}/>
+
+            <TInput label="When do you want it ready?" type="date" hint="Pick your ideal launch date. The actual timeline depends on the website type and features you chose, and how quickly you provide content. If you have a hard deadline, tell us." value={d.budget.deadline} onChange={function(e){upd("budget","deadline",e.target.value);}}/>
+
+            <div style={{padding:"15px 18px",background:"linear-gradient(135deg,#eef2ff,#f5f3ff)",border:"1px solid #c7d2fe",borderRadius:12,marginBottom:18}}>
+              <p style={{margin:"0 0 6px",fontSize:18,fontWeight:700,color:"#3730a3",display:"flex",alignItems:"center",gap:6}}>{"\u26A1"} About speed & priority</p>
+              <p style={{margin:0,fontSize:17,color:"#4338ca",lineHeight:1.6}}>If you need your website <strong>faster than normal</strong>, we can prioritise your project ahead of others — but rush/priority work usually costs more, since it takes extra focus and time. Once we see your request, we'll review our current schedule and <strong>propose a realistic delivery date</strong> based on the priority level you choose. We'll always be honest about what's achievable.</p>
+            </div>
+            <Radio label="How urgent is this project?" hint="This tells us how to plan. Higher priority may cost more but moves you to the front of the line. We'll confirm the timeline and any rush fee before starting." options={[{value:"flexible",label:"No rush — flexible timing"},{value:"normal",label:"Normal — standard timeline"},{value:"priority",label:"Priority — I need it sooner (may cost more)"},{value:"urgent",label:"Urgent — top priority ASAP (rush fee applies)"}]} value={d.budget.priority} onChange={function(v){upd("budget","priority",v);}}/>
+
+            <Chips label="Any additional services?" hint="Optional extras. We'll include pricing in your quote." options={["SEO Optimization","Content Writing","Logo Design","Social Media Setup","Custom Business Email","Training & Handover","Monthly Maintenance","Analytics Setup"]} value={d.budget.addons} onChange={function(v){upd("budget","addons",v);}}/>
+
+            <TArea label="Any notes about budget, payment, or timeline?" hint="Anything else? E.g. 'We need it live before January enrollment' or 'We'd like to pre-pay hosting for 2 years'." value={d.budget.notes} onChange={function(e){upd("budget","notes",e.target.value);}}/>
+          </div>):null}
+
+          {cur.id==="final"?(<div>
+            <p style={{fontSize:18,color:"#7a82a6",margin:"0 0 20px",lineHeight:1.6}}>Almost done! These final questions help us understand your priorities and avoid misunderstandings.</p>
+            <TArea label="Top 3 things your website MUST have?" required hint="Your highest priorities. Be specific." value={d.final.mustHave} onChange={function(e){upd("final","mustHave",e.target.value);}} placeholder="1. Online application form\n2. Photo gallery by events\n3. Mobile-friendly design" rows={4}/>
+            <TArea label="What do you NOT want?" hint="Common dislikes: pop-ups, auto-playing music, clutter, tiny text, slow loading." value={d.final.dontWant} onChange={function(e){upd("final","dontWant",e.target.value);}} placeholder="e.g. No auto-playing music, no clutter"/>
+            <TArea label="Anything else we should know?" hint="Your open space for any requests, concerns, or ideas." value={d.final.additionalNotes} onChange={function(e){upd("final","additionalNotes",e.target.value);}}/>
+            <Radio label="How did you hear about us?" options={["Google Search","Social Media","Friend / Colleague","Returning Client","Other"]} value={d.final.referral} onChange={function(v){upd("final","referral",v);}}/>
+          </div>):null}
+
+          {cur.id==="review"?renderReview():null}
+          </div>
+        </div>
+      </div>
+
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid #e6e9f4",padding:"12px 18px",display:"flex",justifyContent:"space-between",zIndex:10}}><Btn disabled={step===0} onClick={function(){goStep(step-1);}}>Previous</Btn>{step<STEPS.length-1?(<Btn primary onClick={function(){goStep(step+1);}}>{step===STEPS.length-2?"Review My Answers":"Next Step"}</Btn>):(<button disabled={busy} onClick={submit} style={{padding:"10px 26px",background:busy?"#86efac":"linear-gradient(135deg,#22c55e,#16a34a)",color:"#fff",border:"none",borderRadius:10,fontSize:18.5,fontWeight:600,cursor:busy?"wait":"pointer",boxShadow:"0 4px 12px rgba(34,197,94,.28)"}}>{busy?"Submitting...":(status==="revision"?"Resubmit Updated Brief":"Confirm & Submit")}</button>)}</div>
+    </div>
+  );
+}
+
+function App(){
+  var _user=useState(null);var user=_user[0];var setUser=_user[1];
+  if(!user)return <Login onAuth={setUser}/>;
+  if(user.role==="admin")return <Admin onOut={function(){setUser(null);}}/>;
+  return <Questionnaire user={user} onOut={function(){setUser(null);}}/>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
